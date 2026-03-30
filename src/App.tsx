@@ -53,8 +53,7 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      {/* ADICIONE O BASENAME AQUI ABAIXO */}
-      <BrowserRouter basename="/controle_financeiro">
+      <BrowserRouter basename="/controle-financeiro">
         <AuthProvider>
           <Routes>
             <Route path="/auth" element={<AuthRoute />} />
