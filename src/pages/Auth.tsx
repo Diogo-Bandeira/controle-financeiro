@@ -29,7 +29,8 @@ export default function Auth() {
           password,
           options: {
             data: { full_name: name },
-            emailRedirectTo: window.location.origin,
+            // CORRIGIDO: Adicionado o caminho da pasta após a origem
+            emailRedirectTo: `${window.location.origin}/controle-financeiro/`,
           },
         });
         if (error) throw error;
@@ -42,15 +43,14 @@ export default function Auth() {
     }
   };
 
-  // CORRIGIDO: removida dependência do Lovable (@lovable.dev/cloud-auth-js)
-  // Agora usa supabase.auth.signInWithOAuth nativo, que funciona em qualquer hospedagem
   const handleGoogleLogin = async () => {
     setLoading(true);
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: window.location.origin,
+          // CORRIGIDO: Adicionado o caminho da pasta após a origem
+          redirectTo: `${window.location.origin}/controle-financeiro/`,
         },
       });
       if (error) throw error;
