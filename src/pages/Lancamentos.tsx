@@ -14,6 +14,44 @@ const catKeys = Object.keys(CATEGORIAS) as Lancamento["categoria"][];
 const anoAtual = new Date().getFullYear();
 const ANOS = [anoAtual - 2, anoAtual - 1, anoAtual, anoAtual + 1];
 
+// ─── Subcategorias do cartão ──────────────────────────────────────────────────
+const SUBCATEGORIAS: { valor: string; label: string; cor: string }[] = [
+  { valor: "lazer",           label: "Lazer",           cor: "#8B5CF6" },
+  { valor: "gasolina",        label: "Gasolina",        cor: "#F59E0B" },
+  { valor: "alimentacao",     label: "Alimentação",     cor: "#10B981" },
+  { valor: "gastos_pessoais", label: "Gastos Pessoais", cor: "#EC4899" },
+  { valor: "saude",           label: "Saúde",           cor: "#3B82F6" },
+  { valor: "assinaturas",     label: "Assinaturas",     cor: "#06B6D4" },
+  { valor: "vestuario",       label: "Vestuário",       cor: "#EF4444" },
+];
+
+function getSubcategoria(valor: string | null | undefined) {
+  return SUBCATEGORIAS.find((s) => s.valor === valor) ?? null;
+}
+
+// Bolinha colorida de subcategoria
+function DotSubcategoria({ valor }: { valor: string | null | undefined }) {
+  const sub = getSubcategoria(valor);
+  if (!sub) return null;
+  return (
+    <span
+      title={sub.label}
+      className="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full border"
+      style={{
+        backgroundColor: sub.cor + "18", // 10% de opacidade
+        borderColor: sub.cor + "50",
+        color: sub.cor,
+      }}
+    >
+      <span
+        className="inline-block h-2 w-2 rounded-full flex-shrink-0"
+        style={{ backgroundColor: sub.cor }}
+      />
+      {sub.label}
+    </span>
+  );
+}
+
 export default function Lancamentos() {
   const {
     mesSelecionado, setMesSelecionado,
@@ -25,19 +63,20 @@ export default function Lancamentos() {
   const [open, setOpen] = useState(false);
   const [editando, setEditando] = useState<Lancamento | null>(null);
   const [cat, setCat] = useState<Lancamento["categoria"]>("entrada");
+  const [subcat, setSubcat] = useState<string>("");
   const [copiando, setCopiando] = useState(false);
 
-  // Abre o modal para NOVO lançamento
   const abrirNovo = () => {
     setEditando(null);
     setCat("entrada");
+    setSubcat("");
     setOpen(true);
   };
 
-  // Abre o modal para EDITAR um lançamento existente
   const abrirEdicao = (l: Lancamento) => {
     setEditando(l);
     setCat(l.categoria);
+    setSubcat(l.subcategoria ?? "");
     setOpen(true);
   };
 
@@ -46,19 +85,17 @@ export default function Lancamentos() {
     const fd = new FormData(e.currentTarget);
     const descricao = fd.get("descricao") as string;
     const valor = Number(fd.get("valor"));
+    const subcategoria = cat === "cartao" && subcat ? subcat : null;
 
     if (editando) {
-      // Modo edição: atualiza o lançamento existente
-      await updateLancamento({ ...editando, descricao, valor, categoria: cat });
+      await updateLancamento({ ...editando, descricao, valor, categoria: cat, subcategoria });
     } else {
-      // Modo criação: adiciona novo lançamento
-      await addLancamento({ descricao, valor, categoria: cat, mes: mesSelecionado, ano: anoSelecionado });
+      await addLancamento({ descricao, valor, categoria: cat, mes: mesSelecionado, ano: anoSelecionado, subcategoria });
     }
     setOpen(false);
     setEditando(null);
   };
 
-  // Copia UM lançamento para o próximo mês (ou próximo ano se for dezembro)
   const copiarParaProximoMes = async (l: Lancamento) => {
     const proximoMes = l.mes === 11 ? 0 : l.mes + 1;
     const proximoAno = l.mes === 11 ? l.ano + 1 : l.ano;
@@ -66,40 +103,34 @@ export default function Lancamentos() {
       descricao: l.descricao,
       valor: l.valor,
       categoria: l.categoria,
+      subcategoria: l.subcategoria ?? null,
       mes: proximoMes,
       ano: proximoAno,
     });
     toast.success(`Copiado para ${MESES[proximoMes]}/${proximoAno}`);
   };
 
-  // Copia TODOS os lançamentos do mês anterior para o mês atual selecionado
   const copiarDoMesAnterior = async () => {
     const mesAnterior = mesSelecionado === 0 ? 11 : mesSelecionado - 1;
     const anoAnterior = mesSelecionado === 0 ? anoSelecionado - 1 : anoSelecionado;
-
-    const lancamentosMesAnterior = lancamentos.filter(
-      (l) => l.mes === mesAnterior && l.ano === anoAnterior
-    );
-
-    if (lancamentosMesAnterior.length === 0) {
+    const fonte = lancamentos.filter((l) => l.mes === mesAnterior && l.ano === anoAnterior);
+    if (fonte.length === 0) {
       toast.error(`Nenhum lançamento em ${MESES[mesAnterior]}/${anoAnterior}`);
       return;
     }
-
     setCopiando(true);
-    let copiados = 0;
-    for (const l of lancamentosMesAnterior) {
+    for (const l of fonte) {
       await addLancamento({
         descricao: l.descricao,
         valor: l.valor,
         categoria: l.categoria,
+        subcategoria: l.subcategoria ?? null,
         mes: mesSelecionado,
         ano: anoSelecionado,
       });
-      copiados++;
     }
     setCopiando(false);
-    toast.success(`${copiados} lançamento(s) copiado(s) de ${MESES[mesAnterior]}!`);
+    toast.success(`${fonte.length} lançamento(s) copiado(s) de ${MESES[mesAnterior]}!`);
   };
 
   if (loading) {
@@ -112,13 +143,13 @@ export default function Lancamentos() {
 
   return (
     <div className="space-y-6">
+      {/* Cabeçalho */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h2 className="text-2xl font-display font-bold">Lançamentos Mensais</h2>
           <p className="text-muted-foreground text-sm">{MESES[mesSelecionado]} / {anoSelecionado}</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          {/* Seletor de Ano */}
           <Select value={String(anoSelecionado)} onValueChange={(v) => setAnoSelecionado(Number(v))}>
             <SelectTrigger className="w-[100px]"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -126,7 +157,6 @@ export default function Lancamentos() {
             </SelectContent>
           </Select>
 
-          {/* Seletor de Mês */}
           <Select value={String(mesSelecionado)} onValueChange={(v) => setMesSelecionado(Number(v))}>
             <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -134,7 +164,6 @@ export default function Lancamentos() {
             </SelectContent>
           </Select>
 
-          {/* Botão: copiar tudo do mês anterior */}
           <Button variant="outline" onClick={copiarDoMesAnterior} disabled={copiando}>
             {copiando
               ? <Loader2 className="h-4 w-4 animate-spin mr-1" />
@@ -142,7 +171,7 @@ export default function Lancamentos() {
             Copiar mês anterior
           </Button>
 
-          {/* Botão: novo lançamento */}
+          {/* Modal novo/editar */}
           <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setEditando(null); }}>
             <DialogTrigger asChild>
               <Button onClick={abrirNovo}><Plus className="h-4 w-4 mr-1" /> Novo</Button>
@@ -162,13 +191,34 @@ export default function Lancamentos() {
                 </div>
                 <div>
                   <Label>Categoria</Label>
-                  <Select value={cat} onValueChange={(v) => setCat(v as Lancamento["categoria"])}>
+                  <Select value={cat} onValueChange={(v) => { setCat(v as Lancamento["categoria"]); setSubcat(""); }}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {catKeys.map((k) => <SelectItem key={k} value={k}>{CATEGORIAS[k]}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
+
+                {/* Subcategoria — aparece só quando categoria é cartão */}
+                {cat === "cartao" && (
+                  <div>
+                    <Label>Subcategoria <span className="text-muted-foreground text-xs font-normal">(opcional)</span></Label>
+                    <Select value={subcat} onValueChange={setSubcat}>
+                      <SelectTrigger><SelectValue placeholder="Selecione..." /></SelectTrigger>
+                      <SelectContent>
+                        {SUBCATEGORIAS.map((s) => (
+                          <SelectItem key={s.valor} value={s.valor}>
+                            <div className="flex items-center gap-2">
+                              <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: s.cor }} />
+                              {s.label}
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
                 <Button type="submit" className="w-full">
                   {editando ? "Salvar alterações" : "Adicionar"}
                 </Button>
@@ -205,9 +255,21 @@ export default function Lancamentos() {
             </TabsTrigger>
           ))}
         </TabsList>
+
         {catKeys.map((k) => {
           const items = lancamentosMes.filter((l) => l.categoria === k);
           const total = items.reduce((s, l) => s + l.valor, 0);
+
+          // Para cartão: agrupa por subcategoria para mostrar mini-resumo
+          const subcatTotais = k === "cartao"
+            ? SUBCATEGORIAS.map((s) => ({
+                ...s,
+                total: items
+                  .filter((l) => l.subcategoria === s.valor)
+                  .reduce((acc, l) => acc + l.valor, 0),
+              })).filter((s) => s.total > 0)
+            : [];
+
           return (
             <TabsContent key={k} value={k}>
               <div className="finance-card">
@@ -215,40 +277,48 @@ export default function Lancamentos() {
                   <h3 className="font-semibold">{CATEGORIAS[k]}</h3>
                   <span className="font-bold">{formatCurrency(total)}</span>
                 </div>
+
+                {/* Mini-resumo por subcategoria (só na aba cartão) */}
+                {k === "cartao" && subcatTotais.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-4 pb-3 border-b">
+                    {subcatTotais.map((s) => (
+                      <div
+                        key={s.valor}
+                        className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border"
+                        style={{
+                          backgroundColor: s.cor + "18",
+                          borderColor: s.cor + "50",
+                          color: s.cor,
+                        }}
+                      >
+                        <span className="h-2 w-2 rounded-full flex-shrink-0" style={{ backgroundColor: s.cor }} />
+                        <span className="font-medium">{s.label}</span>
+                        <span className="font-bold">{formatCurrency(s.total)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 {items.length === 0 ? (
                   <p className="text-muted-foreground text-sm">Nenhum lançamento nesta categoria.</p>
                 ) : (
                   <div className="divide-y">
                     {items.map((l) => (
                       <div key={l.id} className="flex items-center justify-between py-2.5 gap-2">
-                        <span className="text-sm flex-1 truncate">{l.descricao}</span>
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          {/* Bolinha de subcategoria (só para cartão) */}
+                          {k === "cartao" && <DotSubcategoria valor={l.subcategoria} />}
+                          <span className="text-sm truncate">{l.descricao}</span>
+                        </div>
                         <div className="flex items-center gap-1 shrink-0">
                           <span className="font-medium text-sm">{formatCurrency(l.valor)}</span>
-
-                          {/* Botão editar */}
-                          <Button
-                            variant="ghost" size="icon" className="h-7 w-7"
-                            onClick={() => abrirEdicao(l)}
-                            title="Editar lançamento"
-                          >
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => abrirEdicao(l)} title="Editar">
                             <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
                           </Button>
-
-                          {/* Botão copiar para próximo mês */}
-                          <Button
-                            variant="ghost" size="icon" className="h-7 w-7"
-                            onClick={() => copiarParaProximoMes(l)}
-                            title="Copiar para o próximo mês"
-                          >
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => copiarParaProximoMes(l)} title="Copiar para o próximo mês">
                             <Copy className="h-3.5 w-3.5 text-muted-foreground" />
                           </Button>
-
-                          {/* Botão deletar */}
-                          <Button
-                            variant="ghost" size="icon" className="h-7 w-7"
-                            onClick={() => deleteLancamento(l.id)}
-                            title="Excluir lançamento"
-                          >
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => deleteLancamento(l.id)} title="Excluir">
                             <Trash2 className="h-3.5 w-3.5 text-destructive" />
                           </Button>
                         </div>

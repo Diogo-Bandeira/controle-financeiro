@@ -20,7 +20,8 @@ export interface Lancamento {
   valor: number;
   categoria: "entrada" | "dizimo" | "conta_fixa" | "cartao" | "variavel";
   mes: number;
-  ano: number; // CORRIGIDO: adicionado ano para evitar mistura entre anos
+  ano: number;
+  subcategoria?: string | null; // ← NOVO: subcategoria para compras no cartão
 }
 
 export interface Parcelamento {
@@ -55,11 +56,9 @@ function useFinanceDataInternal() {
   const [prioridades, setPrioridades] = useState<Prioridade[]>([]);
   const [mesSelecionado, setMesSelecionado] = useState(new Date().getMonth());
   const [anoSelecionado, setAnoSelecionado] = useState(new Date().getFullYear());
-  // CORRIGIDO: loading começa false; vai true só durante fetch real
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    // CORRIGIDO: se não há householdId, mantém loading=false sem travar
     if (!householdId) return;
 
     const loadData = async () => {
@@ -71,7 +70,6 @@ function useFinanceDataInternal() {
         supabase.from("prioridades").select("*").eq("household_id", householdId),
       ]);
 
-      // CORRIGIDO: erros do Supabase agora geram toast para o usuário
       if (metasRes.error) toast.error("Erro ao carregar metas");
       if (lancRes.error) toast.error("Erro ao carregar lançamentos");
       if (parcRes.error) toast.error("Erro ao carregar parcelamentos");
@@ -93,7 +91,8 @@ function useFinanceDataInternal() {
           valor: Number(l.valor),
           categoria: l.categoria as Lancamento["categoria"],
           mes: l.mes,
-          ano: l.ano, // CORRIGIDO: inclui ano
+          ano: l.ano,
+          subcategoria: l.subcategoria ?? null, // ← NOVO
         }))
       );
       setParcelamentos(
@@ -179,7 +178,8 @@ function useFinanceDataInternal() {
           valor: l.valor,
           categoria: l.categoria,
           mes: l.mes,
-          ano: l.ano, // CORRIGIDO: salva o ano
+          ano: l.ano,
+          subcategoria: l.subcategoria ?? null, // ← NOVO
         })
         .select()
         .single();
@@ -187,7 +187,15 @@ function useFinanceDataInternal() {
       if (data) {
         setLancamentos((prev) => [
           ...prev,
-          { id: data.id, descricao: data.descricao, valor: Number(data.valor), categoria: data.categoria as Lancamento["categoria"], mes: data.mes, ano: data.ano },
+          {
+            id: data.id,
+            descricao: data.descricao,
+            valor: Number(data.valor),
+            categoria: data.categoria as Lancamento["categoria"],
+            mes: data.mes,
+            ano: data.ano,
+            subcategoria: data.subcategoria ?? null, // ← NOVO
+          },
         ]);
       }
     },
@@ -195,19 +203,20 @@ function useFinanceDataInternal() {
   );
 
   const updateLancamento = useCallback(async (l: Lancamento) => {
-  const { error } = await supabase
-    .from("lancamentos")
-    .update({
-      descricao: l.descricao,
-      valor: l.valor,
-      categoria: l.categoria,
-      mes: l.mes,
-      ano: l.ano,
-    })
-    .eq("id", l.id);
-  if (error) { toast.error("Erro ao atualizar lançamento"); return; }
-  setLancamentos((prev) => prev.map((x) => (x.id === l.id ? l : x)));
-}, []);
+    const { error } = await supabase
+      .from("lancamentos")
+      .update({
+        descricao: l.descricao,
+        valor: l.valor,
+        categoria: l.categoria,
+        mes: l.mes,
+        ano: l.ano,
+        subcategoria: l.subcategoria ?? null, // ← NOVO
+      })
+      .eq("id", l.id);
+    if (error) { toast.error("Erro ao atualizar lançamento"); return; }
+    setLancamentos((prev) => prev.map((x) => (x.id === l.id ? l : x)));
+  }, []);
 
   const deleteLancamento = useCallback(async (id: string) => {
     const { error } = await supabase.from("lancamentos").delete().eq("id", id);
@@ -251,7 +260,6 @@ function useFinanceDataInternal() {
   );
 
   const updateParcelamento = useCallback(async (p: Parcelamento) => {
-    // CORRIGIDO: atualiza todos os campos, não só parcelas_pagas
     const { error } = await supabase
       .from("parcelamentos")
       .update({
@@ -294,7 +302,6 @@ function useFinanceDataInternal() {
   );
 
   const updatePrioridade = useCallback(async (p: Prioridade) => {
-    // CORRIGIDO: atualiza todos os campos, não só concluida
     const { error } = await supabase
       .from("prioridades")
       .update({ descricao: p.descricao, valor: p.valor, prioridade: p.prioridade, concluida: p.concluida })
@@ -311,7 +318,6 @@ function useFinanceDataInternal() {
 
   // ─── Computed values ───────────────────────────────────────────────────────
 
-  // CORRIGIDO: filtra por mes E ano para não misturar anos diferentes
   const lancamentosMes = lancamentos.filter(
     (l) => l.mes === mesSelecionado && l.ano === anoSelecionado
   );
@@ -336,14 +342,14 @@ function useFinanceDataInternal() {
   };
 }
 
-// ─── Provider (envolve o app para compartilhar estado entre páginas) ──────────
+// ─── Provider ─────────────────────────────────────────────────────────────────
 
 export function FinanceProvider({ children }: { children: ReactNode }) {
   const value = useFinanceDataInternal();
   return createElement(FinanceCtx.Provider, { value }, children);
 }
 
-// ─── Hook público (lê do Context compartilhado) ───────────────────────────────
+// ─── Hook público ─────────────────────────────────────────────────────────────
 
 export function useFinanceData() {
   const ctx = useContext(FinanceCtx);
@@ -362,7 +368,7 @@ export const CATEGORIAS: Record<string, string> = {
   entrada: "Entradas",
   dizimo: "Dízimos",
   conta_fixa: "Contas Fixas",
-  cartao: "Cartões de Crédito",
+  cartao: "Compras no Cartão",
   variavel: "Variáveis",
 };
 

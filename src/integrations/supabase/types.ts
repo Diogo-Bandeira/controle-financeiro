@@ -39,6 +39,7 @@ export type Database = {
           household_id: string
           id: string
           mes: number
+          subcategoria: string | null
           updated_at: string
           valor: number
         }
@@ -50,6 +51,7 @@ export type Database = {
           household_id: string
           id?: string
           mes: number
+          subcategoria: string | null
           updated_at?: string
           valor?: number
         }
@@ -61,6 +63,7 @@ export type Database = {
           household_id?: string
           id?: string
           mes?: number
+          subcategoria: string | null
           updated_at?: string
           valor?: number
         }
