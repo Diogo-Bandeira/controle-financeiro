@@ -194,6 +194,21 @@ function useFinanceDataInternal() {
     [householdId]
   );
 
+  const updateLancamento = useCallback(async (l: Lancamento) => {
+  const { error } = await supabase
+    .from("lancamentos")
+    .update({
+      descricao: l.descricao,
+      valor: l.valor,
+      categoria: l.categoria,
+      mes: l.mes,
+      ano: l.ano,
+    })
+    .eq("id", l.id);
+  if (error) { toast.error("Erro ao atualizar lançamento"); return; }
+  setLancamentos((prev) => prev.map((x) => (x.id === l.id ? l : x)));
+}, []);
+
   const deleteLancamento = useCallback(async (id: string) => {
     const { error } = await supabase.from("lancamentos").delete().eq("id", id);
     if (error) { toast.error("Erro ao deletar lançamento"); return; }
@@ -315,7 +330,7 @@ function useFinanceDataInternal() {
     loading, lancamentosMes,
     entradas, dizimos, contasFixas, cartoes, variaveis, totalSaidas, saldo,
     addMeta, updateMeta, deleteMeta,
-    addLancamento, deleteLancamento,
+    addLancamento, updateLancamento, deleteLancamento,
     addParcelamento, updateParcelamento, deleteParcelamento,
     addPrioridade, updatePrioridade, deletePrioridade,
   };
