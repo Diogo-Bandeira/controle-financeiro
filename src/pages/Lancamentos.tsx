@@ -22,7 +22,8 @@ const SUBCATEGORIAS: { valor: string; label: string; cor: string }[] = [
   { valor: "gastos_pessoais", label: "Gastos Pessoais", cor: "#EC4899" },
   { valor: "saude",           label: "Saúde",           cor: "#3B82F6" },
   { valor: "assinaturas",     label: "Assinaturas",     cor: "#06B6D4" },
-  { valor: "vestuario",       label: "Vestuário",       cor: "#EF4444" },
+  { valor: "vestuario",       label: "Vestuário",       cor: "#eeee09" },
+  { valor: "besteiras",       label: "Besteiras",       cor: "rgb(241, 19, 19)" },
 ];
 
 function getSubcategoria(valor: string | null | undefined) {
