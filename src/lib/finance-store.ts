@@ -21,8 +21,8 @@ export interface Lancamento {
   categoria: "entrada" | "dizimo" | "conta_fixa" | "cartao" | "variavel";
   mes: number;
   ano: number;
-  subcategoria?: string | null; // Tipo de gasto (Lazer, Alimentação, etc)
-  cartao_nome?: string | null;  // NOVO: Nome do cartão (Itau, Nubank, etc)
+  subcategoria?: string | null;
+  cartao_nome?: string | null;
 }
 
 export interface Parcelamento {
@@ -63,7 +63,7 @@ function useFinanceDataInternal() {
       const [metasRes, lancRes, parcRes, prioRes] = await Promise.all([
         supabase.from("metas").select("*").eq("household_id", householdId),
         supabase.from("lancamentos").select("*").eq("household_id", householdId),
-        supabase.from("parcelamentos").select("*").eq("household_id", householdId),
+        supabase.from("parcelamentos").select("*").eq("household_id", householdId).order("created_at", { ascending: true }),
         supabase.from("prioridades").select("*").eq("household_id", householdId),
       ]);
 
@@ -84,7 +84,7 @@ function useFinanceDataInternal() {
         mes: l.mes,
         ano: l.ano,
         subcategoria: l.subcategoria ?? null,
-        cartao_nome: l.cartao_nome ?? null, // Carregando o nome do cartão
+        cartao_nome: (l as any).cartao_nome ?? null, // Correção do TypeScript
       })));
 
       setParcelamentos((parcRes.data ?? []).map(p => ({
@@ -113,7 +113,7 @@ function useFinanceDataInternal() {
         mes: l.mes,
         ano: l.ano,
         subcategoria: l.subcategoria ?? null,
-        cartao_nome: l.cartao_nome ?? null, // Salvando o nome do cartão
+        cartao_nome: l.cartao_nome ?? null,
       })
       .select().single();
 
@@ -127,7 +127,7 @@ function useFinanceDataInternal() {
         mes: data.mes,
         ano: data.ano,
         subcategoria: data.subcategoria ?? null,
-        cartao_nome: data.cartao_nome ?? null,
+        cartao_nome: (data as any).cartao_nome ?? null, // Correção do TypeScript
       }]);
     }
   }, [householdId]);
@@ -142,7 +142,7 @@ function useFinanceDataInternal() {
         mes: l.mes,
         ano: l.ano,
         subcategoria: l.subcategoria ?? null,
-        cartao_nome: l.cartao_nome ?? null, // Atualizando o nome do cartão
+        cartao_nome: l.cartao_nome ?? null,
       })
       .eq("id", l.id);
     if (error) { toast.error("Erro ao atualizar lançamento"); return; }
@@ -155,16 +155,102 @@ function useFinanceDataInternal() {
     setLancamentos(prev => prev.filter(l => l.id !== id));
   }, []);
 
-  // Helpers de CRUD para outras entidades omitidos por brevidade, manter iguais ao original
-  const addMeta = useCallback(async (meta: Omit<Meta, "id">) => { /* manter original */ }, [householdId]);
-  const updateMeta = useCallback(async (meta: Meta) => { /* manter original */ }, []);
-  const deleteMeta = useCallback(async (id: string) => { /* manter original */ }, []);
-  const addParcelamento = useCallback(async (p: Omit<Parcelamento, "id">) => { /* manter original */ }, [householdId]);
-  const updateParcelamento = useCallback(async (p: Parcelamento) => { /* manter original */ }, []);
-  const deleteParcelamento = useCallback(async (id: string) => { /* manter original */ }, []);
-  const addPrioridade = useCallback(async (p: Omit<Prioridade, "id">) => { /* manter original */ }, [householdId]);
-  const updatePrioridade = useCallback(async (p: Prioridade) => { /* manter original */ }, []);
-  const deletePrioridade = useCallback(async (id: string) => { /* manter original */ }, []);
+  const addParcelamento = useCallback(async (p: Omit<Parcelamento, "id">) => {
+    if (!householdId) return;
+    const { data, error } = await supabase
+      .from("parcelamentos")
+      .insert({
+        household_id: householdId,
+        descricao: p.descricao,
+        valor_total: p.valorTotal,
+        parcelas: p.parcelas,
+        parcelas_pagas: p.parcelasPagas,
+        valor_parcela: p.valorParcela,
+      })
+      .select().single();
+    if (error) { toast.error("Erro ao adicionar parcelamento"); return; }
+    if (data) {
+      setParcelamentos(prev => [...prev, {
+        id: data.id, descricao: data.descricao, valorTotal: Number(data.valor_total), parcelas: data.parcelas, parcelasPagas: data.parcelas_pagas, valorParcela: Number(data.valor_parcela)
+      }]);
+    }
+  }, [householdId]);
+
+  // Função BLINDADA para atualizar o parcelamento e avisar caso o banco bloqueie
+  const updateParcelamento = useCallback(async (p: Parcelamento) => {
+    const { data, error } = await supabase
+      .from("parcelamentos")
+      .update({
+        descricao: p.descricao,
+        valor_total: p.valorTotal,
+        parcelas: p.parcelas,
+        parcelas_pagas: p.parcelasPagas,
+        valor_parcela: p.valorParcela,
+      })
+      .eq("id", p.id)
+      .select(); // Obrigatório para o Supabase devolver o resultado
+
+    if (error) { 
+      toast.error("Erro ao atualizar banco de dados."); 
+      return; 
+    }
+
+    if (!data || data.length === 0) {
+      toast.error("Pagamento NÃO registrado! Verifique a permissão de UPDATE (RLS) no Supabase.");
+      return;
+    }
+
+    setParcelamentos(prev => prev.map(x => x.id === p.id ? p : x));
+    toast.success("Pagamento registrado com sucesso!");
+  }, []);
+
+  const deleteParcelamento = useCallback(async (id: string) => {
+    const { error } = await supabase.from("parcelamentos").delete().eq("id", id);
+    if (error) { toast.error("Erro ao deletar parcelamento"); return; }
+    setParcelamentos(prev => prev.filter(p => p.id !== id));
+  }, []);
+
+  // CRUD Metas
+  const addMeta = useCallback(async (meta: Omit<Meta, "id">) => {
+    if (!householdId) return;
+    const { data, error } = await supabase.from("metas").insert({
+      household_id: householdId, nome: meta.nome, valor_meta: meta.valorMeta, valor_atual: meta.valorAtual, rendimento: meta.rendimento
+    }).select().single();
+    if (error) { toast.error("Erro ao adicionar meta"); return; }
+    if (data) setMetas(prev => [...prev, { id: data.id, nome: data.nome, valorMeta: Number(data.valor_meta), valorAtual: Number(data.valor_atual), rendimento: Number(data.rendimento) }]);
+  }, [householdId]);
+
+  const updateMeta = useCallback(async (meta: Meta) => {
+    const { error } = await supabase.from("metas").update({ nome: meta.nome, valor_meta: meta.valorMeta, valor_atual: meta.valorAtual, rendimento: meta.rendimento }).eq("id", meta.id);
+    if (error) { toast.error("Erro ao atualizar meta"); return; }
+    setMetas(prev => prev.map(m => m.id === meta.id ? meta : m));
+  }, []);
+
+  const deleteMeta = useCallback(async (id: string) => {
+    const { error } = await supabase.from("metas").delete().eq("id", id);
+    if (error) { toast.error("Erro ao deletar meta"); return; }
+    setMetas(prev => prev.filter(m => m.id !== id));
+  }, []);
+
+  // CRUD Prioridades
+  const addPrioridade = useCallback(async (p: Omit<Prioridade, "id">) => {
+    if (!householdId) return;
+    const { data, error } = await supabase.from("prioridades").insert({ household_id: householdId, descricao: p.descricao, valor: p.valor, prioridade: p.prioridade, concluida: p.concluida }).select().single();
+    if (error) { toast.error("Erro ao adicionar prioridade"); return; }
+    if (data) setPrioridades(prev => [...prev, { id: data.id, descricao: data.descricao, valor: Number(data.valor), prioridade: data.prioridade as Prioridade["prioridade"], concluida: data.concluida }]);
+  }, [householdId]);
+
+  const updatePrioridade = useCallback(async (p: Prioridade) => {
+    const { error } = await supabase.from("prioridades").update({ descricao: p.descricao, valor: p.valor, prioridade: p.prioridade, concluida: p.concluida }).eq("id", p.id);
+    if (error) { toast.error("Erro ao atualizar prioridade"); return; }
+    setPrioridades(prev => prev.map(x => x.id === p.id ? p : x));
+  }, []);
+
+  const deletePrioridade = useCallback(async (id: string) => {
+    const { error } = await supabase.from("prioridades").delete().eq("id", id);
+    if (error) { toast.error("Erro ao deletar prioridade"); return; }
+    setPrioridades(prev => prev.filter(p => p.id !== id));
+  }, []);
 
   const lancamentosMes = lancamentos.filter(l => l.mes === mesSelecionado && l.ano === anoSelecionado);
   const entradas = lancamentosMes.filter(l => l.categoria === "entrada").reduce((s, l) => s + l.valor, 0);
