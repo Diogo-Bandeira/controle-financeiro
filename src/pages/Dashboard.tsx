@@ -3,6 +3,7 @@ import { TrendingUp, TrendingDown, Wallet, Church, Loader2 } from "lucide-react"
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
+import { ConsultorIA } from "@/components/ConsultorIA";
 
 const anoAtual = new Date().getFullYear();
 const ANOS = [anoAtual - 2, anoAtual - 1, anoAtual, anoAtual + 1];
@@ -63,6 +64,10 @@ export default function Dashboard() {
             </SelectContent>
           </Select>
         </div>
+      </div>
+
+      <div className="mt-6 mb-6">
+          <ConsultorIA />
       </div>
 
       {/* Summary cards */}
