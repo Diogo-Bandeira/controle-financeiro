@@ -1,0 +1,114 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Playfair+Display:wght@600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 200 20% 98%;
+    --foreground: 210 25% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 210 25% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 210 25% 12%;
+
+    --primary: 195 70% 28%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 195 25% 93%;
+    --secondary-foreground: 195 70% 22%;
+
+    --muted: 200 15% 95%;
+    --muted-foreground: 210 10% 50%;
+
+    --accent: 42 85% 55%;
+    --accent-foreground: 42 90% 15%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 152 60% 40%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 38 90% 12%;
+
+    --border: 200 18% 90%;
+    --input: 200 18% 90%;
+    --ring: 195 70% 28%;
+
+    --radius: 0.75rem;
+
+    --sidebar-background: 195 70% 22%;
+    --sidebar-foreground: 195 10% 92%;
+    --sidebar-primary: 42 85% 55%;
+    --sidebar-primary-foreground: 42 90% 12%;
+    --sidebar-accent: 195 60% 30%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 195 50% 32%;
+    --sidebar-ring: 42 85% 55%;
+    --sidebar-muted: 195 40% 38%;
+  }
+
+  .dark {
+    --background: 210 25% 8%;
+    --foreground: 200 15% 92%;
+    --card: 210 22% 12%;
+    --card-foreground: 200 15% 92%;
+    --popover: 210 22% 12%;
+    --popover-foreground: 200 15% 92%;
+    --primary: 195 65% 45%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 20% 18%;
+    --secondary-foreground: 195 40% 70%;
+    --muted: 210 18% 16%;
+    --muted-foreground: 210 10% 55%;
+    --accent: 42 85% 55%;
+    --accent-foreground: 42 90% 15%;
+    --destructive: 0 62% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 210 18% 20%;
+    --input: 210 18% 20%;
+    --ring: 195 65% 45%;
+    --sidebar-background: 210 25% 6%;
+    --sidebar-foreground: 200 15% 85%;
+    --sidebar-primary: 42 85% 55%;
+    --sidebar-primary-foreground: 42 90% 12%;
+    --sidebar-accent: 210 22% 15%;
+    --sidebar-accent-foreground: 200 15% 90%;
+    --sidebar-border: 210 18% 18%;
+    --sidebar-ring: 42 85% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+  h1,
+  h2,
+  h3 {
+    font-family: "Playfair Display", serif;
+  }
+}
+
+@layer components {
+  .finance-card {
+    @apply bg-card rounded-xl border shadow-sm p-5 transition-all duration-200 hover:shadow-md;
+  }
+  .stat-value {
+    @apply text-2xl font-bold tracking-tight;
+  }
+  .stat-label {
+    @apply text-sm text-muted-foreground font-medium;
+  }
+  .section-title {
+    @apply text-xl font-semibold tracking-tight;
+  }
+}
