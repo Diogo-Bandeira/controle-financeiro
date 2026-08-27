@@ -14,6 +14,9 @@ import {
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
+import { MessageSquare } from "lucide-react";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { ChatFinanceiro } from "./ChatFinanceiro";
 
 const navItems = [
   { to: "/", label: "Visão Geral", icon: LayoutDashboard },
@@ -122,6 +125,28 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       {/* Main content */}
       <main className="flex-1 p-4 lg:p-8 overflow-auto">
         <div className="max-w-6xl mx-auto animate-fade-in">{children}</div>
+
+        <Sheet>
+          <SheetTrigger asChild>
+            <Button 
+              className="fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-xl"
+              size="icon"
+            >
+              <MessageSquare className="h-6 w-6" />
+            </Button>
+          </SheetTrigger>
+          <SheetContent className="w-full sm:max-w-md p-0 flex flex-col border-l">
+            <SheetHeader className="p-4 border-b bg-card">
+              <SheetTitle className="flex items-center gap-2">
+                <MessageSquare className="h-5 w-5 text-primary" />
+                Consultor Financeiro IA
+              </SheetTitle>
+            </SheetHeader>
+            <div className="flex-1 overflow-hidden">
+              <ChatFinanceiro />
+            </div>
+          </SheetContent>
+        </Sheet>
       </main>
     </div>
   );
