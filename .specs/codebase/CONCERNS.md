@@ -22,15 +22,15 @@
 ## Tech Debt
 
 **Pre-existing lint/type errors:**
-- Issue: `npm run lint` → 10 errors (`no-explicit-any` in `src/`, `supabase/`; `no-require-imports` in `tailwind.config.ts`). `tsc -p tsconfig.app.json` fails on stale generated types (chat tables, `cartao_nome`) and `ConsultorIA.tsx:84` (`analise.alerta` not in type).
+- Issue: `npm run lint` → 8 errors (`no-explicit-any` in `src/`, `supabase/`; `no-require-imports` in `tailwind.config.ts`). `tsc -p tsconfig.app.json` fails only on `ConsultorIA.tsx:84` (`analise.alerta` not in type).
 - Impact: gates can't be green until fixed; `vite build` doesn't typecheck, so it passes anyway.
-- Fix approach: regenerate types (see Schema drift), then fix the remaining `any`.
+- Fix approach: fix `alerta` usage; replace `any` with real types.
 
-**Schema drift (migrations ≠ live DB ≠ generated types):**
-- Issue: `lancamentos.subcategoria`, `lancamentos.cartao_nome`, `conversas_chat`, `mensagens_chat` absent from migration. `types.ts` lacks `cartao_nome` and chat tables → `(l as any).cartao_nome` hacks.
-- Files: `supabase/migrations/*`, `src/integrations/supabase/types.ts`, `src/lib/finance-store.ts:87,130`
-- Impact: fresh env (`supabase db reset`) breaks app; typings lie.
-- Fix approach: `supabase db pull` → migration; `supabase gen types typescript` → regenerate `types.ts`; remove `as any`.
+**Schema drift (migrations ≠ live DB):**
+- Issue: `lancamentos.subcategoria`, `lancamentos.cartao_nome`, `conversas_chat`, `mensagens_chat` absent from migration. `types.ts` regenerated from live DB 2026-10-18 (correct).
+- Files: `supabase/migrations/*`
+- Impact: fresh env (`supabase db reset`) breaks app.
+- Fix approach: `supabase db pull` → migration.
 
 **Duplicated domain constants/types:**
 - Issue: entity mapping snake→camel repeated in load + insert per entity (`finance-store.ts`).

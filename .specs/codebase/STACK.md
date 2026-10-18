@@ -38,7 +38,7 @@
 
 ## External Services
 
-- BaaS: Supabase (project `hhvveuwnfwazqnazenqd`)
+- BaaS: Supabase (ref `elvuavatozpiuwruygyh`)
 - LLM: Google Gemini via `@google/genai` (`npm:` import in Edge Functions), model `gemini-3.6-flash`
 
 ## Development Tools
