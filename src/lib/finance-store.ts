@@ -84,7 +84,7 @@ function useFinanceDataInternal() {
         mes: l.mes,
         ano: l.ano,
         subcategoria: l.subcategoria ?? null,
-        cartao_nome: (l as any).cartao_nome ?? null, // Correção do TypeScript
+        cartao_nome: l.cartao_nome ?? null,
       })));
 
       setParcelamentos((parcRes.data ?? []).map(p => ({
@@ -127,7 +127,7 @@ function useFinanceDataInternal() {
         mes: data.mes,
         ano: data.ano,
         subcategoria: data.subcategoria ?? null,
-        cartao_nome: (data as any).cartao_nome ?? null, // Correção do TypeScript
+        cartao_nome: data.cartao_nome ?? null,
       }]);
     }
   }, [householdId]);
