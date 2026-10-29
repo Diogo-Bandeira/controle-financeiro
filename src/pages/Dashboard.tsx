@@ -4,6 +4,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 import { ConsultorIA } from "@/components/ConsultorIA";
+import { OrcamentoCategorias } from "@/components/OrcamentoCategorias";
 
 const anoAtual = new Date().getFullYear();
 const ANOS = [anoAtual - 2, anoAtual - 1, anoAtual, anoAtual + 1];
@@ -165,6 +166,9 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
+
+        {/* Limites por subcategoria, ao lado do gráfico */}
+        <OrcamentoCategorias />
 
         {/* Metas preview */}
         <div className="finance-card">

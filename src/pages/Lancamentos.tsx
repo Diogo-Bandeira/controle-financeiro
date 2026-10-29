@@ -1,4 +1,5 @@
-import { useFinanceData, formatCurrency, MESES, CATEGORIAS, type Lancamento } from "@/lib/finance-store";
+import { useFinanceData, formatCurrency, MESES, CATEGORIAS, SUBCATEGORIAS, type Lancamento } from "@/lib/finance-store";
+import { OrcamentoCategorias } from "@/components/OrcamentoCategorias";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,18 +14,6 @@ const catKeys = Object.keys(CATEGORIAS) as Lancamento["categoria"][];
 
 const anoAtual = new Date().getFullYear();
 const ANOS = [anoAtual - 2, anoAtual - 1, anoAtual, anoAtual + 1];
-
-// ─── Subcategorias do cartão ──────────────────────────────────────────────────
-const SUBCATEGORIAS: { valor: string; label: string; cor: string }[] = [
-  { valor: "lazer",           label: "Lazer",           cor: "#8B5CF6" },
-  { valor: "gasolina",        label: "Gasolina",        cor: "#F59E0B" },
-  { valor: "alimentacao",     label: "Alimentação",     cor: "#10B981" },
-  { valor: "gastos_pessoais", label: "Gastos Pessoais", cor: "#EC4899" },
-  { valor: "saude",           label: "Saúde",           cor: "#3B82F6" },
-  { valor: "assinaturas",     label: "Assinaturas",     cor: "#06B6D4" },
-  { valor: "vestuario",       label: "Vestuário",       cor: "#eeee09" },
-  { valor: "besteiras",       label: "Besteiras",       cor: "rgb(241, 19, 19)" },
-];
 
 function getSubcategoria(valor: string | null | undefined) {
   return SUBCATEGORIAS.find((s) => s.valor === valor) ?? null;
@@ -89,7 +78,7 @@ export default function Lancamentos() {
     const fd = new FormData(e.currentTarget);
     const descricao = fd.get("descricao") as string;
     const valor = Number(fd.get("valor"));
-    const subcategoria = cat === "cartao" && subcat ? subcat : null;
+    const subcategoria = cat !== "entrada" && subcat ? subcat : null;
     const cartao_nome = cat === "cartao" && cartaoNome ? cartaoNome.trim() : null; // Pega o valor do input livre
 
     if (editando) {
@@ -206,9 +195,8 @@ export default function Lancamentos() {
                   </Select>
                 </div>
 
-                {/* Subcategoria e Nome do Cartão — aparece só quando categoria é cartão */}
-                {cat === "cartao" && (
-                  <>
+                {/* Subcategoria — aparece para qualquer saída */}
+                {cat !== "entrada" && (
                     <div>
                       <Label>Subcategoria (Tipo de gasto) <span className="text-muted-foreground text-xs font-normal">(opcional)</span></Label>
                       <Select value={subcat} onValueChange={setSubcat}>
@@ -225,6 +213,10 @@ export default function Lancamentos() {
                         </SelectContent>
                       </Select>
                     </div>
+                )}
+
+                {/* Nome do Cartão — aparece só quando categoria é cartão */}
+                {cat === "cartao" && (
                     <div>
                       <Label>Nome do Cartão (Ex: Itau, Nubank) <span className="text-muted-foreground text-xs font-normal">(opcional)</span></Label>
                       <Input 
@@ -233,7 +225,6 @@ export default function Lancamentos() {
                         onChange={(e) => setCartaoNome(e.target.value)}
                       />
                     </div>
-                  </>
                 )}
 
                 <Button type="submit" className="w-full">
@@ -263,6 +254,7 @@ export default function Lancamentos() {
         </div>
       </div>
 
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">
       {/* Tabs por categoria */}
       <Tabs defaultValue="entrada">
         <TabsList className="w-full flex flex-wrap h-auto gap-1">
@@ -278,7 +270,7 @@ export default function Lancamentos() {
           const total = items.reduce((s, l) => s + l.valor, 0);
 
           // Mantive o seu resumo original por subcategoria
-          const subcatTotais = k === "cartao"
+          const subcatTotais = k !== "entrada"
             ? SUBCATEGORIAS.map((s) => ({
                 ...s,
                 total: items
@@ -307,7 +299,7 @@ export default function Lancamentos() {
                 </div>
 
                 {/* Mini-resumo por subcategoria (O seu original, mantido!) */}
-                {k === "cartao" && subcatTotais.length > 0 && (
+                {subcatTotais.length > 0 && (
                   <div className="flex flex-wrap gap-2 mb-2">
                     {subcatTotais.map((s) => (
                       <div
@@ -352,7 +344,7 @@ export default function Lancamentos() {
                     {items.map((l) => (
                       <div key={l.id} className="flex items-center justify-between py-2.5 gap-2">
                         <div className="flex items-center gap-2 flex-1 min-w-0">
-                          {k === "cartao" && <DotSubcategoria valor={l.subcategoria} />}
+                          <DotSubcategoria valor={l.subcategoria} />
                           <span className="text-sm truncate">{l.descricao}</span>
                           
                           {/* ← NOVO: Tag sutil mostrando de qual cartão é a compra */}
@@ -383,6 +375,9 @@ export default function Lancamentos() {
           );
         })}
       </Tabs>
+
+      <OrcamentoCategorias className="lg:sticky lg:top-4" />
+      </div>
     </div>
   );
 }
