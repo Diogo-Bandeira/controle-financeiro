@@ -1,82 +1,79 @@
 # Architecture
 
-**Pattern:** Client-heavy SPA over BaaS. Browser talks directly to Supabase (PostgREST, RLS enforces tenancy). Server logic only in 2 Supabase Edge Functions (LLM proxies).
+**Pattern:** Client-heavy SPA over BaaS. Browser talks directly to Supabase (PostgREST + RPCs, RLS enforces tenancy). Server logic: SQL functions (batch RPCs) + 2 Supabase Edge Functions (LLM proxies).
 
 ## High-Level Structure
 
 ```mermaid
 flowchart LR
   subgraph Browser[Vite SPA - GitHub Pages]
-    App[App.tsx routes] --> AuthP[AuthProvider useAuth]
+    App[App.tsx routes + ThemeProvider] --> AuthP[AuthProvider useAuth]
     AuthP --> FinP[FinanceProvider finance-store]
-    FinP --> Pages[pages/*]
+    FinP --> Layout[AppLayout: SeletorMes global, alertas, nav]
+    Layout --> Pages[pages/*]
     FinP --> Chat[ChatFinanceiro]
     FinP --> Cons[ConsultorIA]
   end
   AuthP -- auth + profiles --> SB[(Supabase Postgres + RLS)]
-  FinP -- CRUD by household_id --> SB
+  FinP -- CRUD + RPC + Realtime --> SB
   Chat -- conversas_chat / mensagens_chat --> SB
-  Chat -- invoke --> EF1[Edge fn chat-financeiro]
-  Cons -- invoke --> EF2[Edge fn consultor-financeiro]
+  Chat -- invoke JWT --> EF1[Edge fn chat-financeiro]
+  Cons -- invoke JWT --> EF2[Edge fn consultor-financeiro]
   EF1 --> Gemini[Google Gemini]
   EF2 --> Gemini
 ```
+
+## Domain model
+
+- **mes 0–11** everywhere (Janeiro = 0). `new Date(ano, mes, dia)`.
+- `lancamentos`: `data` (DATE) + competência `mes/ano`. Entradas/contas fixas/variáveis: mês da data. Cartão: mês da **fatura** (vencimento). `origem` = manual | parcela | recorrente | importado. `status` pago | pendente. `reembolso` (entradas).
+- `cartoes`: `dia_fechamento` / `dia_vencimento` (nullable só nos migrados). Fatura: compra < dia de fechamento → fecha no mês; senão no seguinte. Vencimento no mesmo mês do fechamento se `dia_vencimento > dia_fechamento`, senão no seguinte. Dias limitados ao último dia do mês.
+- `parcelamentos` vinculados (`cartao_id` + `primeira_fatura_*`) geram 1 lançamento por parcela (`parcelamento_id`, `parcela_num`). Status da parcela é **derivado**: paga se fatura em `faturas_pagas` ou hoje ≥ vencimento. `parcelas_pagas` nos vinculados = parcelas anteriores não geradas. Legados (sem cartão) seguem com `parcelas_pagas` manual.
+- `subcategorias` (por household, seed `seed_subcategorias`) + `orcamentos` (override mensal). Limite efetivo = override do mês ?? `limite_padrao`. `conta_no_orcamento=false` (ex.: Compras de Terceiros) fica fora do total.
+- `recorrencias`: geradas ao abrir um mês (≤ atual+1); unique parcial `(recorrencia_id, ano, mes)` evita duplicar.
+- `metas.valor_atual` = saldo inicial; atual = saldo inicial + Σ `aportes`.
+- Renda para planejamento = entradas − reembolsos.
 
 ## Identified Patterns
 
 ### Household multi-tenancy
 
-**Location:** `supabase/migrations/20260326195042_*.sql`, `src/hooks/useAuth.tsx`
-**Purpose:** Share data between couple/family members.
-**Implementation:** `handle_new_user` trigger creates `households` row + `profiles` row on signup. RLS on every table: `household_id = get_user_household_id(auth.uid())` (SECURITY DEFINER fn). Client reads `profiles.household_id` once in `AuthProvider`, exposes `householdId`.
-**Note:** No UI/flow to join another household — each signup gets its own.
+**Location:** migrations, `src/hooks/useAuth.tsx`
+**Implementation:** `handle_new_user` cria household + profile + seed de subcategorias. RLS em todas as tabelas: `household_id = get_user_household_id(auth.uid())`. `households.codigo_convite` + RPC `entrar_household(codigo)` (SECURITY DEFINER) move o perfil para outro household (tela Configurações).
 
-### Context store ("finance-store")
+### Store ("finance-store")
 
-**Location:** `src/lib/finance-store.ts`
-**Purpose:** Single source of truth for metas, lancamentos, parcelamentos, prioridades + selected month/year + derived totals.
-**Implementation:** `useFinanceDataInternal()` hook → `FinanceCtx` via `createElement` (file is `.ts`). On `householdId` change: `Promise.all` loads 4 full tables. CRUD fns: call Supabase → on success patch local state (no refetch, no optimistic rollback). Errors → `toast.error`. Derived totals (`entradas`, `saidas`, `saldo`) computed each render.
-**Example:** `addLancamento`, `updateParcelamento` (checks empty `data` to detect RLS block).
+**Location:** `src/lib/finance-store.ts` (hook), `src/lib/store/{types,mappers,derivados}.ts`
+**Implementation:** `useEntidade()` genérico (load/add/update/remove + toasts) por tabela; um mapper por entidade (`mappers.ts`) usado no load e na escrita. Lotes via RPC (`inserir_lancamentos`, `salvar_parcelamento`, `excluir_parcelamento`) e depois recarrega do banco. Realtime: um canal por household assina as tabelas e recarrega a entidade alterada (debounce 400 ms). Totais com `sumMoney` (centavos). Derivados: `limiteEfetivo`, `resumoFatura`, `faturasDoCartao`, `progressoParcelamento`, `statusLancamentoCartao`. Mês/ano selecionado global (`SeletorMes` no topo).
 
-### snake_case ↔ camelCase mapping
+### Domínio puro (testado)
 
-**Location:** inline in each loader/CRUD fn in `finance-store.ts`
-**Implementation:** manual object mapping, `Number()` on NUMERIC columns. Duplicated per entity (load + insert paths).
+`src/lib/fatura.ts` (fatura, parcelas, status, limite), `money.ts`, `recorrencias.ts`, `parcelamento-ops.ts` (regerar/quitar/aplicar a partir de/duplicados), `importacao.ts` (CSV/OFX), `texto.ts` (normalização/similaridade), `metas.ts`. Sem React/Supabase.
 
-### Protected routes
+### Formulários reutilizáveis
 
-**Location:** `src/App.tsx`
-**Implementation:** `ProtectedRoute` waits `loading`, redirects `/auth` if no user, wraps children in `FinanceProvider`. `AuthRoute` redirects logged users to `/`. Nested `<Routes>` inside `/*`.
+`LancamentoForm` (sugestão de subcategoria/cartão por histórico, fatura calculada, vira parcelamento se N>1, "só esta / esta e as próximas" em parcelas, vincular aporte em reserva), `ParcelamentoForm` (novo / editar com "aplicar às futuras" / vincular legado com detecção de duplicados), `CartaoFormDialog`, `MoneyInput` (máscara BRL).
+
+### UX transversal
+
+Tema (`next-themes`, classe `.dark`), ocultar valores (`formatCurrency` → `R$ •••••`, localStorage), `AlertasPopover`, skeletons (`PaginaCarregando`), estados vazios (`EstadoVazio`), mobile < md: barra inferior + FAB "+".
 
 ### LLM proxy Edge Functions
 
-**Location:** `supabase/functions/*/index.ts`
-**Implementation:** Deno `serve`, CORS `*`, read `GEMINI_API_KEY` env, build system prompt with client-supplied financial context, call `ai.models.generateContent`. `consultor-financeiro` uses `responseSchema` (structured JSON: `resumo_executivo`, `raio_x_alertas`, `alavancagem_metas_prioridades`, `plano_acao[]`). `chat-financeiro` returns `{ reply }`.
+**Location:** `supabase/functions/*/index.ts`, `_shared/http.ts`
+**Implementation:** `Deno.serve`, `verify_jwt = true`, CORS restrito (GH Pages + localhost:8080), limite 200 KB (413), validação mínima do corpo (400), erros JSON com 5xx para falhas do Gemini, `npm:@google/genai@2.19.0` fixado. Contexto montado no cliente por `useContextoIA` (cartões/faturas, parcelas futuras, limites, reembolsos, prioridades, metas+aportes); chat envia só as últimas 20 mensagens.
 
 ## Data Flow
 
-### Auth
+### Parcelamento novo
 
-1. `Auth.tsx` → `signInWithPassword` / `signUp` (with `full_name` metadata) / `signInWithOAuth(google)` redirect `${origin}/controle-financeiro/`
-2. `AuthProvider`: `getSession()` + `onAuthStateChange` → set user → query `profiles.household_id`
-3. `ProtectedRoute` renders app once `loading=false`
+`ParcelamentoForm` → `calcularFatura(dataCompra)` → `gerarParcelas` (centavos, última absorve diferença) → `lancamentosDasParcelas` → RPC `salvar_parcelamento` (upsert parcelamento + apaga ids + insere parcelas numa transação) → store recarrega parcelamentos e lançamentos.
 
-### Lançamento CRUD
+### Lançamentos em lote
 
-1. `Lancamentos.tsx` form submit → `FormData` → `addLancamento/updateLancamento`
-2. Store → `supabase.from("lancamentos").insert/update` with `household_id`
-3. Success → local state patch; Dashboard totals recompute from `lancamentosMes`
-4. "Copiar do mês anterior" → sequential `await addLancamento` loop
-
-### AI Diagnóstico
-
-`ConsultorIA` (Dashboard) → slim payload (month lancamentos, metas, parcelamentos, prioridades, resumo) → `functions.invoke('consultor-financeiro')` → render 4 sections.
-
-### AI Chat
-
-`AppLayout` Sheet → `ChatFinanceiro` → on first msg create `conversas_chat` row (household from `metas` lookup) → insert user msg in `mensagens_chat` → invoke `chat-financeiro` with full history + context → insert model reply.
+"Copiar mês anterior", recorrências e importação → `inserirLancamentos` (RPC `inserir_lancamentos`, `ON CONFLICT DO NOTHING`). Edição em massa → `updateLancamentos` (upsert único). Exclusão → `deleteLancamentos` devolve removidos para "Desfazer".
 
 ## Code Organization
 
-**Approach:** Layer-based, flat: `pages/` (route screens, contain UI + form logic), `components/` (layout + AI widgets), `components/ui/` (shadcn), `hooks/`, `lib/` (store + utils), `integrations/supabase/` (generated client + types).
-**Module boundaries:** Pages access data only via `useFinanceData()`; exception: `ChatFinanceiro`, `ConsultorIA`, `useAuth`, `Auth.tsx` call `supabase` directly.
+**Approach:** Layer-based: `pages/` (telas), `components/` (layout, forms, widgets, chips), `components/ui/` (shadcn), `hooks/`, `lib/` (domínio puro + store), `integrations/supabase/` (client + types mantidos à mão até regenerar).
+**Module boundaries:** páginas acessam dados via `useFinanceData()`; exceções: `ChatFinanceiro` (tabelas de chat), `ConsultorIA`/Chat (functions.invoke), `useAuth`, `Auth.tsx`.

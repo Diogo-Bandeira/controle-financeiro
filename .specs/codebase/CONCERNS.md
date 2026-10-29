@@ -1,93 +1,57 @@
 # Codebase Concerns
 
-**Analysis Date:** 2026-10-18
+**Analysis Date:** 2026-10-29
 
 ## Security Considerations
 
-**Unauthenticated Gemini proxy (cost abuse):**
-- Risk: `consultor-financeiro` has `verify_jwt = false` and CORS `*`; anyone with the function URL can burn `GEMINI_API_KEY` quota. Payload is client-controlled → prompt injection trivial (low impact, but no size limits either).
-- Files: `supabase/config.toml`, `supabase/functions/consultor-financeiro/index.ts`, `supabase/functions/chat-financeiro/index.ts`
-- Current mitigation: none in code. `chat-financeiro` relies on default JWT verify (not declared).
-- Recommendations: `verify_jwt = true` for both (declare explicitly); validate body size/shape (zod); restrict CORS origin to GH Pages domain; optionally rate-limit per user.
-
 **Financial context trusted from client:**
-- Risk: Edge Functions accept totals/lists from browser instead of reading DB with user JWT. Not a leak, but AI output can be fed fabricated data; and server can't enforce scope.
+- Risk: Edge Functions accept totals/lists from browser instead of reading DB with user JWT. Not a leak, but AI output can be fed fabricated data.
 - Fix approach: in function, create Supabase client with caller's `Authorization` header and query data server-side.
+
+**No rate limit on Gemini proxies:**
+- `verify_jwt = true`, CORS restrito e limite de 200 KB já aplicados; qualquer usuário autenticado ainda pode chamar sem limite de frequência.
+
+**`entrar_household` sem consentimento do dono:**
+- Quem tiver o código de convite entra no household. Fix: código rotacionável / expiração.
 
 ## Tech Debt
 
-**Pre-existing lint/type errors:**
-- Issue: `npm run lint` → 6 errors (`no-explicit-any` in `src/`, `supabase/`; `no-empty-object-type`; `no-require-imports` in `tailwind.config.ts`). `tsc -p tsconfig.app.json` passes.
-- Impact: lint gate can't be green until fixed.
-- Fix approach: replace `any` with real types.
+**Generated types hand-edited:**
+- `src/integrations/supabase/types.ts` foi atualizado à mão para a migration `20261029120000`. Regenerar com `supabase gen types` após aplicar.
 
-**Duplicated domain constants/types:**
-- Issue: entity mapping snake→camel repeated in load + insert per entity (`finance-store.ts`).
-- Fix approach: one mapper fn per entity.
+**`lancamentos.cartao_nome` obsoleta:**
+- Mantida no banco após backfill para `cartao_id`; o app não usa mais. Remover numa migration futura.
 
-**Committed build + double lockfile:**
-- Issue: `dist/` tracked despite `.gitignore`; `bun.lock` + `package-lock.json` both present (package-lock currently modified).
-- Fix approach: `git rm -r --cached dist`; keep one lockfile (npm, per scripts).
+**Committed double lockfile:** `bun.lock` + `package-lock.json`. Keep one (npm).
 
-**Unused deps:** `@tanstack/react-query` (provider only), `react-hook-form`, `zod`, `@hookform/resolvers`, `@google/genai` (frontend), `next-themes`, many shadcn ui files. Low risk; bundle bloat.
+**Unused deps:** `@tanstack/react-query` (provider only), `react-hook-form`, `zod`, `@hookform/resolvers`, `@google/genai` (frontend), many shadcn ui files.
+
+**Bundle único ~1,5 MB (gzip ~420 KB):** sem code-splitting por rota (recharts pesa). Fix: `React.lazy` nas páginas.
 
 ## Known Bugs
 
-**Chat fails for households without metas:**
-- Symptoms: first chat message → "Household não encontrado." toast.
-- Trigger: new user with zero `metas` rows sends a chat message.
-- Files: `src/components/ChatFinanceiro.tsx` (~L113–123)
-- Root cause: household_id resolved via `supabase.from('metas').select('household_id').limit(1).single()` instead of `useAuth().householdId`.
-
-**`useAuth` effect resubscribes + stale closure:**
-- Symptoms: auth listener torn down/recreated whenever `user.id` changes; `getProfile` may run twice on login; inside listener `user` is closure value.
-- Files: `src/hooks/useAuth.tsx` (deps `[user?.id]`)
-- Fix: empty deps, compare via ref or functional state.
-
-**Chat persists partial conversations silently:**
-- Symptoms: user message insert result ignored; if AI call fails, DB has user msg without reply; UI state keeps it too. Insert errors on `mensagens_chat` never surfaced.
-- Files: `src/components/ChatFinanceiro.tsx` (sendMessage)
-
-**"Copiar do mês anterior" non-atomic + duplicates:**
-- Symptoms: sequential inserts; failure midway leaves partial copy; clicking twice duplicates all; per-item error toasts.
-- Files: `src/pages/Lancamentos.tsx` (`copiarDoMesAnterior`)
-- Fix: single bulk `insert([...])` in store; guard against existing rows.
-
-**GH Pages deep-link refresh 404:**
-- Symptoms: reload on `/controle-financeiro/metas` → GitHub 404 (no SPA fallback `404.html`).
-- Files: `public/` (missing), `vite.config.ts`
-- Root cause: BrowserRouter on static host. Verify before fixing.
+Nenhum conhecido no momento. Resolvidos em 2026-10-29: chat sem metas, efeito do `useAuth`, inserts do chat sem tratamento, "copiar mês" não atômico, 404 em deep-link no GH Pages, erros de lint pré-existentes.
 
 ## Fragile Areas
 
 **`finance-store.ts`:**
-- Why fragile: one 289-line hook owns all entities, mapping, totals; every page re-renders on any change; local state patched without refetch (multi-user household edits not synced — no realtime).
-- Safe modification: keep return shape stable (pages destructure it); add mappers rather than inline.
-- Test coverage: none.
+- Um contexto com todas as entidades; qualquer mudança re-renderiza todas as páginas consumidoras. Realtime recarrega a tabela inteira afetada.
+- Safe modification: manter o shape do retorno; mappers em `store/mappers.ts`.
 
-**Money as JS floats:**
-- Files: `finance-store.ts` totals (`reduce` sums), `Parcelamentos.tsx` (`valorTotal / parcelas` unrounded).
-- Impact: cent rounding errors in totals/parcelas. Fix: integer cents or round at boundaries.
+**Status de parcela derivado do relógio do cliente:** depende de `new Date()` e do fuso do navegador.
 
-**Edge Function error handling:**
-- `consultor-financeiro`: `JSON.parse(response.text)` unguarded; error response omits `Content-Type`; all errors → 400 (should be 5xx for upstream). Model id `gemini-3.6-flash` unverified — confirm against Gemini docs.
+**Parcelamentos legados:** sem cartão/datas até serem vinculados; "termina em" é estimado a partir de hoje.
+
+**Edge Function model id:** `gemini-3.6-flash` não verificado contra a doc do Gemini.
 
 ## Scaling Limits
 
-**Full-table loads:**
-- Current: loads all `lancamentos` of household (all years) on login; chat sends full history each message.
-- Limit: grows linearly; fine for single family for years. Chat token cost grows per turn.
-- Path: filter by `ano`; cap chat history window.
-
-## Dependencies at Risk
-
-- `lovable-tagger`, `lovable-agent-playwright-config` (latter not installed) — vendor lock to Lovable tooling.
-- Deno `std@0.168.0` `serve` deprecated → use `Deno.serve`. `npm:@google/genai` unpinned → breaking changes on redeploy.
+- Carrega todos os `lancamentos` do household (todos os anos). Path: filtrar por janela de anos.
+- Chat envia as últimas 20 mensagens + contexto completo a cada turno.
 
 ## Test Coverage Gaps
 
-- **Totals/saldo calc** (`finance-store.ts`) — wrong dashboard numbers unnoticed. Priority: High.
-- **Month/year rollover** (copy functions) — Dec→Jan edge. Priority: High.
-- **RLS policies** — tenancy leak unnoticed. Priority: High.
-- **Edge Functions** — no tests. Priority: Medium.
-- Pages/UI — none. Priority: Low.
+- **RLS policies / RPCs** — validados manualmente num Postgres local, sem teste automatizado. Priority: High.
+- **Store com Supabase mockado** — só smoke de renderização (`src/test/paginas.smoke.test.tsx`). Priority: Medium.
+- **Edge Functions** — sem testes. Priority: Medium.
+- **E2E** — Playwright config depende de `lovable-agent-playwright-config` (não instalado). Priority: Low.
