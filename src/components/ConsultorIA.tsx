@@ -44,7 +44,7 @@ export function ConsultorIA() {
       if (error) throw error;
       setAnalise(data);
       toast.success("Diagnóstico gerado com sucesso!");
-    } catch (err: any) {
+    } catch (err) {
       toast.error("Erro ao consultar a Inteligência Artificial.");
       console.error(err);
     } finally {
@@ -81,7 +81,7 @@ export function ConsultorIA() {
                 <LineChart className="h-4 w-4 text-primary" /> Resumo Executivo
               </h4>
               <p className="text-sm text-muted-foreground leading-relaxed">
-                {analise.resumo_executivo || analise.alerta || "Resumo não disponível no momento."}
+                {analise.resumo_executivo || "Resumo não disponível no momento."}
               </p>
             </div>
 
@@ -115,8 +115,8 @@ export function ConsultorIA() {
                 <Lightbulb className="h-4 w-4 text-warning" /> Plano de Ação
               </h4>
               <ul className="space-y-3">
-                {/* BLINDAGEM: Se plano_acao não existir, tenta ler 'dicas'. Se nenhum existir, retorna um array vazio e não quebra a tela */}
-                {((analise.plano_acao as string[]) || (analise as any).dicas || []).map((dica, i) => (
+                {/* BLINDAGEM: Se plano_acao não existir, retorna um array vazio e não quebra a tela */}
+                {(analise.plano_acao ?? []).map((dica, i) => (
                   <li key={i} className="flex items-start gap-3 text-sm">
                     <div className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
                     <span className="text-foreground/90 leading-relaxed">{dica}</span>
