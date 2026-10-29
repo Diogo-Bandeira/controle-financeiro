@@ -1,7 +1,7 @@
 project_id = "elvuavatozpiuwruygyh"
 [functions.consultor-financeiro]
 enabled = true
-verify_jwt = false
+verify_jwt = true
 import_map = "./functions/consultor-financeiro/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
@@ -9,3 +9,8 @@ entrypoint = "./functions/consultor-financeiro/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/consultor-financeiro/*.html" ]
+
+[functions.chat-financeiro]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/chat-financeiro/index.ts"

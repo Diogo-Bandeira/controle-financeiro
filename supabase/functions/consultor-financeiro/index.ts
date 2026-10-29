@@ -1,82 +1,88 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { GoogleGenAI, Type, Schema } from "npm:@google/genai"
+import { GoogleGenAI, Type, type Schema } from 'npm:@google/genai@2.19.0'
+import { DICIONARIO_CONTEXTO, ErroHttp, corsHeaders, ehObjeto, json, lerCorpoJson, respostaDeErro } from '../_shared/http.ts'
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
-
-// O novo Schema reflete os 4 passos do seu prompt
+// O Schema reflete os 4 passos do prompt
 const relatorioFinanceiroSchema: Schema = {
   type: Type.OBJECT,
   properties: {
     resumo_executivo: { type: Type.STRING },
     raio_x_alertas: { type: Type.STRING },
     alavancagem_metas_prioridades: { type: Type.STRING },
-    plano_acao: { 
-      type: Type.ARRAY, 
+    plano_acao: {
+      type: Type.ARRAY,
       items: { type: Type.STRING },
-      description: "Exatamente 3 dicas práticas e específicas"
-    }
+      description: 'Exatamente 3 dicas práticas e específicas',
+    },
   },
-  required: ['resumo_executivo', 'raio_x_alertas', 'alavancagem_metas_prioridades', 'plano_acao']
-};
+  required: ['resumo_executivo', 'raio_x_alertas', 'alavancagem_metas_prioridades', 'plano_acao'],
+}
 
-serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
+function validar(corpo: unknown): Record<string, unknown> {
+  if (!ehObjeto(corpo)) throw new ErroHttp(400, 'Corpo inválido')
+  if (!ehObjeto(corpo.resumo)) throw new ErroHttp(400, 'resumo é obrigatório')
+  if (!Array.isArray(corpo.lancamentos)) throw new ErroHttp(400, 'lancamentos deve ser uma lista')
+  return corpo
+}
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders(req) })
 
   try {
-    // Agora recebemos as prioridades e parcelamentos também
-    const { lancamentos, metas, parcelamentos, prioridades, resumo } = await req.json()
+    const contexto = validar(await lerCorpoJson(req))
 
     const apiKey = Deno.env.get('GEMINI_API_KEY')
-    if (!apiKey) throw new Error('GEMINI_API_KEY não configurada.')
+    if (!apiKey) throw new ErroHttp(500, 'GEMINI_API_KEY não configurada.')
 
     const ai = new GoogleGenAI({ apiKey })
 
-    // SEU PROMPT EXATAMENTE AQUI
     const systemInstruction = `Você é um consultor financeiro sênior, especialista em planejamento familiar e inteligência de dados. Sua comunicação é direta, analítica, empática e focada em resultados práticos.
+
+    ${DICIONARIO_CONTEXTO}
 
     Sua missão é cruzar os dados fornecidos e entregar um diagnóstico completo, estruturado da seguinte forma:
 
     1. RESUMO EXECUTIVO
-    - Avalie o saldo final (Entradas - Saídas).
-    - Analise a proporção gasta em "Necessidades" (Contas Fixas) versus "Desejos" (Cartão + Variáveis). Informe se a proporção está saudável.
+    - Avalie o saldo final usando a renda para planejamento (entradas − reembolsos) versus as saídas pessoais.
+    - Analise a proporção gasta por tipo de subcategoria (necessidade, desejo, poupança, doação). Informe se a proporção está saudável.
 
     2. RAIO-X DOS GASTOS E ALERTAS
-    - Identifique exatamente para onde o dinheiro está indo. Destaque a subcategoria do Cartão de Crédito ou a despesa Variável que mais consumiu recursos.
-    - Emita um alerta severo se as saídas totais ultrapassarem 85% das entradas ou se o "Comprometimento Mensal" com parcelamentos estiver asfixiando o fluxo de caixa.
+    - Identifique para onde o dinheiro está indo. Destaque as subcategorias que mais consumiram recursos e as que passaram do limite do mês.
+    - Emita um alerta severo se as saídas pessoais ultrapassarem 85% da renda para planejamento ou se as faturas/parcelas futuras estiverem asfixiando o fluxo de caixa.
+
     3. ALAVANCAGEM DE METAS E PRIORIDADES
-    - Analise o progresso das "Top Metas". O ritmo de economia atual é suficiente?
-    - Olhe para as "Prioridades de Compra" pendentes. Com base no saldo do mês, o usuário tem fôlego para adquirir o item de prioridade "Alta"?
+    - Analise o progresso das metas (atual, prazo, aportes). O ritmo de aportes é suficiente para o prazo?
+    - Olhe as prioridades de compra pendentes e o mês planejado. Há fôlego para a prioridade "alta" considerando limites e parcelas futuras?
 
     4. PLANO DE AÇÃO (3 DICAS PRÁTICAS)
-    - Forneça 3 recomendações acionáveis, específicas e personalizadas baseadas nos dados reais apresentados. Não use dicas genéricas. Diga exatamente qual despesa cortar ou como realocar o saldo restante para acelerar uma meta específica.`;
+    - Forneça 3 recomendações acionáveis, específicas e personalizadas baseadas nos dados reais. Não use dicas genéricas. Diga exatamente qual despesa cortar ou como realocar o saldo para acelerar uma meta específica.
+    Ao citar meses, escreva o nome do mês (não o número 0–11).`
 
-    const promptText = `
-    Resumo do Mês: ${JSON.stringify(resumo)}
-    Lançamentos: ${JSON.stringify(lancamentos)}
-    Metas: ${JSON.stringify(metas)}
-    Parcelamentos: ${JSON.stringify(parcelamentos)}
-    Prioridades Pendentes: ${JSON.stringify(prioridades)}`;
+    const promptText = `Dados financeiros do mês (JSON):\n${JSON.stringify(contexto)}`
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
-      contents: [{ role: 'user', parts: [{ text: promptText }] }],
-      config: {
-        systemInstruction,
-        responseMimeType: 'application/json',
-        responseSchema: relatorioFinanceiroSchema,
-        temperature: 0.2,
-      }
-    });
+    let texto: string
+    try {
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.6-flash',
+        contents: [{ role: 'user', parts: [{ text: promptText }] }],
+        config: {
+          systemInstruction,
+          responseMimeType: 'application/json',
+          responseSchema: relatorioFinanceiroSchema,
+          temperature: 0.2,
+        },
+      })
+      texto = response.text || '{}'
+    } catch (erro) {
+      console.error('Falha no Gemini (consultor-financeiro):', erro)
+      throw new ErroHttp(502, 'Falha ao consultar o modelo de IA')
+    }
 
-    const aiResult = JSON.parse(response.text || '{}');
-
-    return new Response(JSON.stringify(aiResult), { 
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-    })
+    try {
+      return json(req, JSON.parse(texto))
+    } catch {
+      throw new ErroHttp(502, 'Resposta da IA em formato inválido')
+    }
   } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), { status: 400, headers: corsHeaders })
+    return respostaDeErro(req, error, 'consultor-financeiro')
   }
 })
