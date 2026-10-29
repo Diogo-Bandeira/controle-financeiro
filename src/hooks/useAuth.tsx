@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { User, Session } from "@supabase/supabase-js";
 
@@ -23,60 +23,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [householdId, setHouseholdId] = useState<string | null>(null);
+  // Usuário cujo perfil já foi carregado: evita refetch quando só o token é renovado.
+  const perfilDeRef = useRef<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
 
     async function getProfile(userId: string) {
-      try {
-        const { data: profile, error } = await supabase
-          .from("profiles")
-          .select("household_id")
-          .eq("user_id", userId)
-          .single();
-          
-        if (mounted) {
-          setHouseholdId(profile?.household_id ?? null);
-          setLoading(false);
-        }
-      } catch (error) {
-        if (mounted) setLoading(false);
-      }
+      if (perfilDeRef.current === userId) return;
+      perfilDeRef.current = userId;
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("household_id")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (!mounted) return;
+      setHouseholdId(profile?.household_id ?? null);
+      setLoading(false);
     }
 
-    // Busca a sessão inicial manualmente para evitar depender apenas do listener
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (mounted) {
-        setSession(session);
-        setUser(session?.user ?? null);
-        if (session?.user) {
-           getProfile(session.user.id);
-        } else {
-           setLoading(false);
-        }
+    function aplicarSessao(s: Session | null) {
+      if (!mounted) return;
+      setSession(s);
+      setUser(s?.user ?? null);
+      if (s?.user) {
+        // Fora do callback do onAuthStateChange: chamadas ao supabase dentro dele podem travar.
+        const userId = s.user.id;
+        setTimeout(() => getProfile(userId), 0);
+        return;
       }
-    });
+      perfilDeRef.current = null;
+      setHouseholdId(null);
+      setLoading(false);
+    }
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (mounted) {
-        setSession(session);
-        setUser(session?.user ?? null);
-        
-        // Evita refetch desnecessário se o usuário for o mesmo
-        if (session?.user && session.user.id !== user?.id) {
-          getProfile(session.user.id);
-        } else if (!session?.user) {
-          setHouseholdId(null);
-          setLoading(false);
-        }
-      }
-    });
+    supabase.auth.getSession().then(({ data }) => aplicarSessao(data.session));
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => aplicarSessao(s));
 
     return () => {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, [user?.id]); // Adiciona o user.id para controle
+  }, []);
 
   const signOut = async () => {
     await supabase.auth.signOut();
