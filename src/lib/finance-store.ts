@@ -291,14 +291,15 @@ export const CATEGORIAS: Record<string, string> = { entrada: "Entradas", conta_f
 export interface Subcategoria { valor: string; label: string; cor: string; limite: number }
 export const SUBCATEGORIAS: Subcategoria[] = [
   { valor: "alimentacao",     label: "Alimentação",                   cor: "#10B981", limite: 1880 },
-  { valor: "moradia",         label: "Moradia & Contas Fixas",        cor: "#64748B", limite: 500 },
-  { valor: "manutencao",      label: "Manutenção",                    cor: "#F97316", limite: 940 },
-  { valor: "transporte",      label: "Transporte",                    cor: "#F59E0B", limite: 800 },
-  { valor: "saude",           label: "Saúde",                         cor: "#3B82F6", limite: 700 },
-  { valor: "gastos_pessoais", label: "Gastos Pessoais",               cor: "#EC4899", limite: 940 },
-  { valor: "assinaturas",     label: "Assinaturas",                   cor: "#06B6D4", limite: 550 },
-  { valor: "lazer",           label: "Lazer",                         cor: "#8B5CF6", limite: 700 },
+  { valor: "reserva",         label: "Reserva / Investimentos",       cor: "#84CC16", limite: 1500 },
   { valor: "gastos_extras",   label: "Gastos Extras / Parcelamentos", cor: "#EF4444", limite: 850 },
-  { valor: "reserva",         label: "Reserva / Investimentos",       cor: "#84CC16", limite: 1800 },
+  { valor: "manutencao",      label: "Manutenção",                    cor: "#F97316", limite: 800 },
+  { valor: "transporte",      label: "Transporte",                    cor: "#F59E0B", limite: 750 },
+  { valor: "dizimo",          label: "Dízimo / Doações",              cor: "#A16207", limite: 730 },
+  { valor: "gastos_pessoais", label: "Gastos Pessoais",               cor: "#EC4899", limite: 700 },
+  { valor: "saude",           label: "Saúde",                         cor: "#3B82F6", limite: 700 },
+  { valor: "lazer",           label: "Lazer",                         cor: "#8B5CF6", limite: 600 },
+  { valor: "assinaturas",     label: "Assinaturas",                   cor: "#06B6D4", limite: 500 },
+  { valor: "moradia",         label: "Moradia & Contas Fixas",        cor: "#64748B", limite: 490 },
 ];
 export function formatCurrency(value: number): string { return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value); }
