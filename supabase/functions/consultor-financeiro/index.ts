@@ -41,13 +41,11 @@ serve(async (req) => {
 
     1. RESUMO EXECUTIVO
     - Avalie o saldo final (Entradas - Saídas).
-    - Analise a proporção gasta em "Necessidades" (Contas Fixas + Dízimos) versus "Desejos" (Cartão + Variáveis). Informe se a proporção está saudável.
+    - Analise a proporção gasta em "Necessidades" (Contas Fixas) versus "Desejos" (Cartão + Variáveis). Informe se a proporção está saudável.
 
     2. RAIO-X DOS GASTOS E ALERTAS
     - Identifique exatamente para onde o dinheiro está indo. Destaque a subcategoria do Cartão de Crédito ou a despesa Variável que mais consumiu recursos.
     - Emita um alerta severo se as saídas totais ultrapassarem 85% das entradas ou se o "Comprometimento Mensal" com parcelamentos estiver asfixiando o fluxo de caixa.
-    - Verifique se o Dízimo registrado condiz com a sugestão de 10% das Entradas.
-
     3. ALAVANCAGEM DE METAS E PRIORIDADES
     - Analise o progresso das "Top Metas". O ritmo de economia atual é suficiente?
     - Olhe para as "Prioridades de Compra" pendentes. Com base no saldo do mês, o usuário tem fôlego para adquirir o item de prioridade "Alta"?

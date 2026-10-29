@@ -1,5 +1,5 @@
 import { useFinanceData, formatCurrency, MESES } from "@/lib/finance-store";
-import { TrendingUp, TrendingDown, Wallet, Church, Loader2 } from "lucide-react";
+import { TrendingUp, TrendingDown, Wallet, Loader2 } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
@@ -13,7 +13,7 @@ export default function Dashboard() {
   const {
     metas, mesSelecionado, setMesSelecionado,
     anoSelecionado, setAnoSelecionado,
-    entradas, totalSaidas, saldo, dizimos, contasFixas, cartoes, variaveis, loading
+    entradas, totalSaidas, saldo, contasFixas, cartoes, variaveis, loading
   } = useFinanceData();
 
   if (loading) {
@@ -24,12 +24,11 @@ export default function Dashboard() {
     );
   }
 
-  const necessidades = contasFixas + dizimos;
+  const necessidades = contasFixas;
   const desejos = cartoes + variaveis;
 
   const pieData = [
     { name: "Contas Fixas", value: contasFixas, color: "hsl(195, 70%, 28%)" },
-    { name: "Dízimos", value: dizimos, color: "hsl(42, 85%, 55%)" },
     { name: "Cartões", value: cartoes, color: "hsl(0, 72%, 51%)" },
     { name: "Variáveis", value: variaveis, color: "hsl(152, 60%, 40%)" },
   ].filter((d) => d.value > 0);
@@ -72,7 +71,7 @@ export default function Dashboard() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="finance-card">
           <div className="flex items-center gap-2 mb-2">
             <div className="h-8 w-8 rounded-lg bg-success/10 flex items-center justify-center">
@@ -101,19 +100,6 @@ export default function Dashboard() {
             <span className="stat-label">Saldo</span>
           </div>
           <p className={`stat-value ${saldo >= 0 ? "text-success" : "text-destructive"}`}>{formatCurrency(saldo)}</p>
-        </div>
-
-        <div className="finance-card">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="h-8 w-8 rounded-lg bg-accent/20 flex items-center justify-center">
-              <Church className="h-4 w-4 text-accent-foreground" />
-            </div>
-            <span className="stat-label">Dízimo (10%)</span>
-          </div>
-          <p className="stat-value text-accent-foreground">{formatCurrency(dizimos)}</p>
-          <p className="text-xs text-muted-foreground mt-1">
-            Sugerido: {formatCurrency(entradas * 0.1)}
-          </p>
         </div>
       </div>
 

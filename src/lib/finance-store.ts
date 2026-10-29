@@ -18,7 +18,7 @@ export interface Lancamento {
   id: string;
   descricao: string;
   valor: number;
-  categoria: "entrada" | "dizimo" | "conta_fixa" | "cartao" | "variavel";
+  categoria: "entrada" | "conta_fixa" | "cartao" | "variavel";
   mes: number;
   ano: number;
   subcategoria?: string | null;
@@ -254,11 +254,10 @@ function useFinanceDataInternal() {
 
   const lancamentosMes = lancamentos.filter(l => l.mes === mesSelecionado && l.ano === anoSelecionado);
   const entradas = lancamentosMes.filter(l => l.categoria === "entrada").reduce((s, l) => s + l.valor, 0);
-  const dizimos = lancamentosMes.filter(l => l.categoria === "dizimo").reduce((s, l) => s + l.valor, 0);
   const contasFixas = lancamentosMes.filter(l => l.categoria === "conta_fixa").reduce((s, l) => s + l.valor, 0);
   const cartoes = lancamentosMes.filter(l => l.categoria === "cartao").reduce((s, l) => s + l.valor, 0);
   const variaveis = lancamentosMes.filter(l => l.categoria === "variavel").reduce((s, l) => s + l.valor, 0);
-  const totalSaidas = dizimos + contasFixas + cartoes + variaveis;
+  const totalSaidas = contasFixas + cartoes + variaveis;
   const saldo = entradas - totalSaidas;
 
   return {
@@ -266,7 +265,7 @@ function useFinanceDataInternal() {
     mesSelecionado, setMesSelecionado,
     anoSelecionado, setAnoSelecionado,
     loading, lancamentosMes,
-    entradas, dizimos, contasFixas, cartoes, variaveis, totalSaidas, saldo,
+    entradas, contasFixas, cartoes, variaveis, totalSaidas, saldo,
     addMeta, updateMeta, deleteMeta,
     addLancamento, updateLancamento, deleteLancamento,
     addParcelamento, updateParcelamento, deleteParcelamento,
@@ -286,7 +285,7 @@ export function useFinanceData() {
 }
 
 export const MESES = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
-export const CATEGORIAS: Record<string, string> = { entrada: "Entradas", dizimo: "Dízimos", conta_fixa: "Contas Fixas", cartao: "Compras no Cartão", variavel: "Variáveis" };
+export const CATEGORIAS: Record<string, string> = { entrada: "Entradas", conta_fixa: "Contas Fixas", cartao: "Compras no Cartão", variavel: "Variáveis" };
 
 // Subcategorias (tipo de gasto) de qualquer saída, com teto mensal planejado
 export interface Subcategoria { valor: string; label: string; cor: string; limite: number }
