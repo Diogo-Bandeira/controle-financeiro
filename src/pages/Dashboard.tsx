@@ -1,188 +1,320 @@
-import { useFinanceData, formatCurrency, MESES } from "@/lib/finance-store";
-import { TrendingUp, TrendingDown, Wallet, Loader2 } from "lucide-react";
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Link } from "react-router-dom";
+import { TrendingUp, TrendingDown, Wallet, CalendarClock, CreditCard, Target, PiggyBank, BarChart3 } from "lucide-react";
+import { Bar, BarChart, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Progress } from "@/components/ui/progress";
 import { ConsultorIA } from "@/components/ConsultorIA";
 import { OrcamentoCategorias } from "@/components/OrcamentoCategorias";
+import { EstadoVazio, PaginaCarregando } from "@/components/EstadoVazio";
+import { useFinanceData, formatCurrency, MESES } from "@/lib/finance-store";
+import { formatDiaMes, formatDiaMesData, formatMesAno, MESES_CURTOS } from "@/lib/format";
+import { compararMesAno, diasEntre, indiceMes, parseISODate, somarMeses, type MesAno } from "@/lib/fatura";
+import { sumMoney } from "@/lib/money";
+import { cn } from "@/lib/utils";
 
-const anoAtual = new Date().getFullYear();
-const ANOS = [anoAtual - 2, anoAtual - 1, anoAtual, anoAtual + 1];
+const COR_EIXO = "hsl(var(--muted-foreground))";
+const tooltipStyle = {
+  contentStyle: { backgroundColor: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 },
+  labelStyle: { color: "hsl(var(--popover-foreground))", fontWeight: 600 },
+  itemStyle: { color: "hsl(var(--popover-foreground))" },
+};
+
+const rotuloMes = ({ mes, ano }: MesAno) => `${MESES_CURTOS[mes]}/${String(ano).slice(2)}`;
 
 export default function Dashboard() {
   const {
-    metas, mesSelecionado, setMesSelecionado,
-    anoSelecionado, setAnoSelecionado,
-    entradas, totalSaidas, saldo, contasFixas, cartoes, variaveis, loading
+    loading, ocultarValores, mesSelecionado, anoSelecionado, lancamentos, lancamentosMes, lancamentosDoMes,
+    entradas, reembolsos, rendaPlanejamento, totalSaidas, saldo, cartoes, parcelamentos, metas, aportes,
+    resumoFatura, progressoParcelamento,
   } = useFinanceData();
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
+  if (loading) return <PaginaCarregando />;
+
+  const hoje = new Date();
+  const sel = { mes: mesSelecionado, ano: anoSelecionado };
+  const compacto = (v: number) =>
+    ocultarValores ? "•••" : new Intl.NumberFormat("pt-BR", { notation: "compact", maximumFractionDigits: 1 }).format(v);
+  const tooltipBRL = (v: number) => formatCurrency(v);
+
+  // ─── A pagar e faturas ─────────────────────────────────────────────────
+  const cartoesAtivos = cartoes.filter((c) => c.ativo);
+  const faturasMes = cartoesAtivos.map((c) => ({ cartao: c, fatura: resumoFatura(c.id, sel) })).filter((f) => f.fatura);
+  const contasPendentesMes = lancamentosMes.filter((l) => l.categoria === "conta_fixa" && l.status === "pendente");
+  const aPagar = sumMoney([
+    ...contasPendentesMes.map((l) => l.valor),
+    ...faturasMes.filter((f) => f.fatura.status !== "paga").map((f) => f.fatura.total),
+  ]);
+  const contasProximas = lancamentos
+    .filter((l) => l.categoria === "conta_fixa" && l.status === "pendente")
+    .map((l) => ({ l, dias: diasEntre(hoje, parseISODate(l.data)) }))
+    .filter(({ dias }) => dias >= 0 && dias <= 7)
+    .sort((a, b) => a.dias - b.dias);
+
+  const situacaoFatura = (status: string, dataFechamento: Date) => {
+    if (status === "paga") return { texto: "paga", cls: "text-success" };
+    if (status === "fechada") return { texto: "fechada", cls: "text-warning" };
+    if (status === "futura") return { texto: `fecha ${formatDiaMesData(dataFechamento)}`, cls: "text-muted-foreground" };
+    const dias = diasEntre(hoje, dataFechamento);
+    return { texto: dias <= 0 ? "fecha hoje" : `fecha em ${dias} dia${dias === 1 ? "" : "s"}`, cls: dias <= 3 ? "text-warning" : "text-muted-foreground" };
+  };
+
+  // ─── Compromissos futuros de parcelas (6 meses) ─────────────────────────
+  const meses6 = Array.from({ length: 6 }, (_, i) => somarMeses(sel.mes, sel.ano, i));
+  const progressos = parcelamentos.map((p) => ({ p, prog: progressoParcelamento(p) }));
+  const legados = progressos.filter(({ prog }) => !prog.vinculado && prog.restantes > 0);
+  const mesAtual = { mes: hoje.getMonth(), ano: hoje.getFullYear() };
+  const series = [
+    ...cartoes.map((c) => ({ chave: c.id, nome: c.nome, cor: c.cor ?? "#64748B" })),
+    { chave: "legado", nome: "Legado (estimado)", cor: COR_EIXO },
+  ];
+  const dadosParcelas = meses6.map((m) => {
+    const doMes = lancamentos.filter((l) => l.parcelamentoId && l.mes === m.mes && l.ano === m.ano);
+    const porCartao = Object.fromEntries(cartoes.map((c) => [c.id, sumMoney(doMes.filter((l) => l.cartaoId === c.id).map((l) => l.valor))]));
+    const legado = sumMoney(
+      legados
+        .filter(({ prog }) => compararMesAno(m, mesAtual) >= 0 && prog.termino && compararMesAno(m, prog.termino) <= 0)
+        .map(({ p }) => p.valorParcela),
     );
-  }
+    return { rotulo: rotuloMes(m), ...porCartao, legado };
+  });
+  const seriesUsadas = series.filter((s) => dadosParcelas.some((d) => (d[s.chave] ?? 0) > 0));
+  const terminandoEmBreve = progressos
+    .filter(({ prog }) => !prog.concluido && prog.termino && indiceMes(prog.termino) - indiceMes(sel) >= 0 && indiceMes(prog.termino) - indiceMes(sel) <= 2)
+    .sort((a, b) => compararMesAno(a.prog.termino, b.prog.termino));
+  const liberaTotal = sumMoney(terminandoEmBreve.map(({ p }) => p.valorParcela));
 
-  const necessidades = contasFixas;
-  const desejos = cartoes + variaveis;
+  // ─── Evolução 12 meses ─────────────────────────────────────────────────
+  const evolucao = Array.from({ length: 12 }, (_, i) => somarMeses(sel.mes, sel.ano, i - 11)).map((m) => {
+    const ls = lancamentosDoMes(m.ano, m.mes);
+    const ent = sumMoney(ls.filter((l) => l.categoria === "entrada").map((l) => l.valor));
+    const sai = sumMoney(ls.filter((l) => l.categoria !== "entrada").map((l) => l.valor));
+    return { rotulo: rotuloMes(m), entradas: ent, saidas: sai, saldo: sumMoney([ent, -sai]) };
+  });
+  const temEvolucao = evolucao.some((e) => e.entradas > 0 || e.saidas > 0);
 
-  const pieData = [
-    { name: "Contas Fixas", value: contasFixas, color: "hsl(195, 70%, 28%)" },
-    { name: "Cartões", value: cartoes, color: "hsl(0, 72%, 51%)" },
-    { name: "Variáveis", value: variaveis, color: "hsl(152, 60%, 40%)" },
-  ].filter((d) => d.value > 0);
-
-  const topMetas = metas.slice(0, 3);
+  // ─── Poupança e metas ──────────────────────────────────────────────────
+  const reservaMes = sumMoney(lancamentosMes.filter((l) => l.categoria !== "entrada" && l.subcategoria === "reserva").map((l) => l.valor));
+  const taxaPoupanca = rendaPlanejamento > 0 ? (reservaMes / rendaPlanejamento) * 100 : null;
+  const doMesSel = (iso: string) => {
+    const d = parseISODate(iso);
+    return d.getMonth() === sel.mes && d.getFullYear() === sel.ano;
+  };
+  const metasResumo = metas.slice(0, 4).map((meta) => {
+    const aps = aportes.filter((a) => a.metaId === meta.id);
+    const atual = sumMoney([meta.valorAtual, ...aps.map((a) => a.valor)]);
+    const aporteMes = sumMoney(aps.filter((a) => doMesSel(a.data)).map((a) => a.valor));
+    const pct = meta.valorMeta > 0 ? Math.min((atual / meta.valorMeta) * 100, 100) : 0;
+    return { meta, atual, aporteMes, pct };
+  });
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-display font-bold text-foreground">Visão Geral</h2>
-          <p className="text-muted-foreground text-sm">Resumo financeiro de {MESES[mesSelecionado]} / {anoSelecionado}</p>
-        </div>
-        <div className="flex gap-2">
-          <Select value={String(anoSelecionado)} onValueChange={(v) => setAnoSelecionado(Number(v))}>
-            <SelectTrigger className="w-[100px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {ANOS.map((a) => (
-                <SelectItem key={a} value={String(a)}>{a}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={String(mesSelecionado)} onValueChange={(v) => setMesSelecionado(Number(v))}>
-            <SelectTrigger className="w-[160px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {MESES.map((m, i) => (
-                <SelectItem key={i} value={String(i)}>{m}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+      <div>
+        <h2 className="text-2xl font-display font-bold text-foreground">Visão Geral</h2>
+        <p className="text-muted-foreground text-sm">Resumo financeiro de {MESES[mesSelecionado]} / {anoSelecionado}</p>
       </div>
 
-      <div className="mt-6 mb-6">
-          <ConsultorIA />
-      </div>
-
-      {/* Summary cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      {/* Cards de resumo */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="finance-card">
           <div className="flex items-center gap-2 mb-2">
-            <div className="h-8 w-8 rounded-lg bg-success/10 flex items-center justify-center">
-              <TrendingUp className="h-4 w-4 text-success" />
-            </div>
+            <div className="h-8 w-8 rounded-lg bg-success/10 flex items-center justify-center"><TrendingUp className="h-4 w-4 text-success" /></div>
             <span className="stat-label">Entradas</span>
           </div>
           <p className="stat-value text-success">{formatCurrency(entradas)}</p>
+          {reembolsos > 0 && <p className="text-xs text-muted-foreground mt-1">dos quais reembolsos {formatCurrency(reembolsos)}</p>}
+          <p className="text-xs text-muted-foreground">renda para planejamento {formatCurrency(rendaPlanejamento)}</p>
         </div>
-
         <div className="finance-card">
           <div className="flex items-center gap-2 mb-2">
-            <div className="h-8 w-8 rounded-lg bg-destructive/10 flex items-center justify-center">
-              <TrendingDown className="h-4 w-4 text-destructive" />
-            </div>
+            <div className="h-8 w-8 rounded-lg bg-destructive/10 flex items-center justify-center"><TrendingDown className="h-4 w-4 text-destructive" /></div>
             <span className="stat-label">Saídas</span>
           </div>
           <p className="stat-value text-destructive">{formatCurrency(totalSaidas)}</p>
         </div>
-
         <div className="finance-card">
           <div className="flex items-center gap-2 mb-2">
-            <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
-              <Wallet className="h-4 w-4 text-primary" />
-            </div>
+            <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center"><Wallet className="h-4 w-4 text-primary" /></div>
             <span className="stat-label">Saldo</span>
           </div>
-          <p className={`stat-value ${saldo >= 0 ? "text-success" : "text-destructive"}`}>{formatCurrency(saldo)}</p>
+          <p className={cn("stat-value", saldo >= 0 ? "text-success" : "text-destructive")}>{formatCurrency(saldo)}</p>
+        </div>
+        <div className="finance-card">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="h-8 w-8 rounded-lg bg-warning/10 flex items-center justify-center"><CalendarClock className="h-4 w-4 text-warning" /></div>
+            <span className="stat-label">A pagar ainda neste mês</span>
+          </div>
+          <p className="stat-value">{formatCurrency(aPagar)}</p>
+          <p className="text-xs text-muted-foreground mt-1">contas pendentes + faturas não pagas</p>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Pie chart */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+        {/* Próximas faturas e vencimentos */}
         <div className="finance-card">
-          <h3 className="section-title mb-4">Distribuição de Gastos</h3>
-          {pieData.length > 0 ? (
-            <div className="flex flex-col sm:flex-row items-center gap-4">
-              <div className="w-48 h-48">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={pieData} cx="50%" cy="50%" innerRadius={45} outerRadius={80} dataKey="value" paddingAngle={3}>
-                      {pieData.map((d, i) => (
-                        <Cell key={i} fill={d.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(v: number) => formatCurrency(v)} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="flex flex-col gap-2">
-                {pieData.map((d, i) => (
-                  <div key={i} className="flex items-center gap-2 text-sm">
-                    <div className="h-3 w-3 rounded-full" style={{ backgroundColor: d.color }} />
-                    <span className="text-muted-foreground">{d.name}</span>
-                    <span className="font-semibold ml-auto">{formatCurrency(d.value)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
+          <h3 className="section-title mb-4">Próximas faturas e vencimentos</h3>
+          {faturasMes.length === 0 && contasProximas.length === 0 ? (
+            <EstadoVazio
+              icone={CreditCard}
+              titulo="Nada a vencer por aqui"
+              descricao="Cadastre seus cartões para acompanhar faturas e vencimentos."
+              acao={<Link to="/cartoes" className="text-sm text-primary hover:underline">Ir para Cartões</Link>}
+            />
           ) : (
-            <p className="text-muted-foreground text-sm">Nenhum gasto registrado neste mês.</p>
+            <div className="space-y-4">
+              {faturasMes.length > 0 && (
+                <div className="divide-y">
+                  {faturasMes.map(({ cartao, fatura }) => {
+                    const sit = situacaoFatura(fatura.status, fatura.dataFechamento);
+                    return (
+                      <div key={cartao.id} className="flex items-center gap-3 py-2.5">
+                        <span className="h-8 w-1.5 rounded-full shrink-0" style={{ backgroundColor: cartao.cor ?? "#64748B" }} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">{cartao.nome}</p>
+                          <p className="text-xs text-muted-foreground">
+                            vence {formatDiaMesData(fatura.dataVencimento)} · <span className={sit.cls}>{sit.texto}</span>
+                          </p>
+                        </div>
+                        <span className="font-semibold text-sm whitespace-nowrap">{formatCurrency(fatura.total)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {contasProximas.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Contas pendentes (7 dias)</p>
+                  <div className="divide-y">
+                    {contasProximas.map(({ l, dias }) => (
+                      <div key={l.id} className="flex items-center gap-3 py-2 text-sm">
+                        <span className="flex-1 truncate">{l.descricao}</span>
+                        <span className={cn("text-xs whitespace-nowrap", dias <= 2 ? "text-warning font-semibold" : "text-muted-foreground")}>
+                          {dias === 0 ? "vence hoje" : `vence ${formatDiaMes(l.data)}`}
+                        </span>
+                        <span className="font-medium whitespace-nowrap">{formatCurrency(l.valor)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           )}
-
-          <div className="mt-6 space-y-3">
-            <div>
-              <div className="flex justify-between text-sm mb-1">
-                <span className="text-muted-foreground">Necessidades</span>
-                <span className="font-medium">{formatCurrency(necessidades)}</span>
-              </div>
-              <Progress value={entradas > 0 ? (necessidades / entradas) * 100 : 0} className="h-2" />
-            </div>
-            <div>
-              <div className="flex justify-between text-sm mb-1">
-                <span className="text-muted-foreground">Desejos</span>
-                <span className="font-medium">{formatCurrency(desejos)}</span>
-              </div>
-              <Progress value={entradas > 0 ? (desejos / entradas) * 100 : 0} className="h-2" />
-            </div>
-          </div>
         </div>
 
-        {/* Limites por subcategoria, ao lado do gráfico */}
         <OrcamentoCategorias />
+      </div>
 
-        {/* Metas preview */}
+      {/* Compromissos futuros de parcelas */}
+      <div className="finance-card">
+        <h3 className="section-title mb-4">Compromissos futuros de parcelas</h3>
+        {seriesUsadas.length === 0 ? (
+          <EstadoVazio
+            icone={CreditCard}
+            titulo="Sem parcelas nos próximos meses"
+            acao={<Link to="/parcelamentos" className="text-sm text-primary hover:underline">Ver parcelamentos</Link>}
+          />
+        ) : (
+          <>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={dadosParcelas} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                  <XAxis dataKey="rotulo" tick={{ fill: COR_EIXO, fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <YAxis tickFormatter={compacto} tick={{ fill: COR_EIXO, fontSize: 12 }} axisLine={false} tickLine={false} width={48} />
+                  <Tooltip formatter={tooltipBRL} cursor={{ fill: "hsl(var(--muted))", opacity: 0.4 }} {...tooltipStyle} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  {seriesUsadas.map((s) => (
+                    <Bar key={s.chave} dataKey={s.chave} name={s.nome} stackId="parcelas" fill={s.cor} maxBarSize={48} />
+                  ))}
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            {terminandoEmBreve.length > 0 && (
+              <div className="mt-4 pt-3 border-t">
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-sm font-medium">Termina em breve</p>
+                  <p className="text-xs text-muted-foreground">libera {formatCurrency(liberaTotal)}/mês</p>
+                </div>
+                <div className="divide-y">
+                  {terminandoEmBreve.map(({ p, prog }) => (
+                    <div key={p.id} className="flex items-center gap-3 py-2 text-sm">
+                      <span className="flex-1 truncate">{p.descricao}</span>
+                      <span className="text-xs text-muted-foreground whitespace-nowrap">termina em {formatMesAno(prog.termino.mes, prog.termino.ano)}</span>
+                      <span className="font-medium whitespace-nowrap text-success">+{formatCurrency(p.valorParcela)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Evolução 12 meses */}
+      <div className="finance-card">
+        <h3 className="section-title mb-4">Evolução dos últimos 12 meses</h3>
+        {!temEvolucao ? (
+          <EstadoVazio icone={BarChart3} titulo="Ainda não há histórico suficiente" descricao="Os lançamentos dos meses aparecem aqui." />
+        ) : (
+          <div className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={evolucao} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                <XAxis dataKey="rotulo" tick={{ fill: COR_EIXO, fontSize: 11 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                <YAxis tickFormatter={compacto} tick={{ fill: COR_EIXO, fontSize: 12 }} axisLine={false} tickLine={false} width={48} />
+                <Tooltip formatter={tooltipBRL} cursor={{ fill: "hsl(var(--muted))", opacity: 0.4 }} {...tooltipStyle} />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Bar dataKey="entradas" name="Entradas" fill="hsl(var(--success))" radius={[3, 3, 0, 0]} maxBarSize={20} />
+                <Bar dataKey="saidas" name="Saídas" fill="hsl(var(--destructive))" radius={[3, 3, 0, 0]} maxBarSize={20} />
+                <Line dataKey="saldo" name="Saldo" type="monotone" stroke="hsl(var(--primary))" strokeWidth={2} dot={{ r: 2 }} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6 items-start">
+        {/* Taxa de poupança */}
+        <div className="finance-card">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="h-8 w-8 rounded-lg bg-success/10 flex items-center justify-center"><PiggyBank className="h-4 w-4 text-success" /></div>
+            <span className="stat-label">Taxa de poupança</span>
+          </div>
+          <p className="stat-value">{taxaPoupanca == null ? "—" : `${taxaPoupanca.toFixed(1)}%`}</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            {formatCurrency(reservaMes)} em Reserva ÷ {formatCurrency(rendaPlanejamento)} de renda para planejamento
+          </p>
+        </div>
+
+        {/* Progresso das metas */}
         <div className="finance-card">
           <h3 className="section-title mb-4">Progresso das Metas</h3>
-          {topMetas.length > 0 ? (
-            <div className="space-y-4">
-              {topMetas.map((meta) => {
-                const pct = meta.valorMeta > 0 ? Math.min((meta.valorAtual / meta.valorMeta) * 100, 100) : 0;
-                return (
-                  <div key={meta.id}>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span className="font-medium">{meta.nome}</span>
-                      <span className="text-muted-foreground">{pct.toFixed(0)}%</span>
-                    </div>
-                    <Progress value={pct} className="h-2.5" />
-                    <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                      <span>{formatCurrency(meta.valorAtual)}</span>
-                      <span>{formatCurrency(meta.valorMeta)}</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+          {metasResumo.length === 0 ? (
+            <EstadoVazio
+              icone={Target}
+              titulo="Nenhuma meta cadastrada"
+              acao={<Link to="/metas" className="text-sm text-primary hover:underline">Criar uma meta</Link>}
+            />
           ) : (
-            <p className="text-muted-foreground text-sm">Nenhuma meta cadastrada.</p>
+            <div className="space-y-4">
+              {metasResumo.map(({ meta, atual, aporteMes, pct }) => (
+                <div key={meta.id}>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className="font-medium truncate">{meta.nome}</span>
+                    <span className="text-muted-foreground">{pct.toFixed(0)}%</span>
+                  </div>
+                  <Progress value={pct} className="h-2.5" />
+                  <div className="flex justify-between text-xs text-muted-foreground mt-1 gap-2">
+                    <span>{formatCurrency(atual)} de {formatCurrency(meta.valorMeta)}</span>
+                    <span className={aporteMes > 0 ? "text-success" : undefined}>aporte no mês {formatCurrency(aporteMes)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       </div>
+
+      <ConsultorIA />
     </div>
   );
 }

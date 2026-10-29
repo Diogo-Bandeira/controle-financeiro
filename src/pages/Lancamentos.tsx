@@ -1,382 +1,766 @@
-import { useFinanceData, formatCurrency, MESES, CATEGORIAS, SUBCATEGORIAS, type Lancamento } from "@/lib/finance-store";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import {
+  ArrowDownUp, ChevronDown, CopyPlus, Download, FileUp, Filter, Loader2, Pencil, Plus, Receipt, Repeat, Search, Trash2, X,
+} from "lucide-react";
+import {
+  useFinanceData, formatCurrency, CATEGORIAS, type Categoria, type Lancamento, type NovoLancamento, type OrigemLancamento,
+} from "@/lib/finance-store";
 import { OrcamentoCategorias } from "@/components/OrcamentoCategorias";
+import { LancamentoForm } from "@/components/LancamentoForm";
+import { RecorrenciasDialog } from "@/components/RecorrenciasDialog";
+import { ImportarExtratoDialog } from "@/components/ImportarExtratoDialog";
+import { CartaoChip, ChipCor, OpcaoCor, SubcategoriaChip } from "@/components/SubcategoriaChip";
+import { EstadoVazio, PaginaCarregando } from "@/components/EstadoVazio";
+import { MoneyInput } from "@/components/MoneyInput";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Trash2, Loader2, Pencil, Copy, CopyPlus } from "lucide-react";
-import { useState } from "react";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { DIAS_SEMANA_CURTOS, MESES, formatDataBR, formatDiaMes, formatDiaMesData, gravarLocalStorage, lerLocalStorage } from "@/lib/format";
+import { parseISODate, somarMeses, toISODate, ultimoDia } from "@/lib/fatura";
+import { sumMoney } from "@/lib/money";
+import { competenciaDoLancamento } from "@/lib/recorrencias";
+import { excluirAPartirDe } from "@/lib/parcelamento-ops";
+import { iniciais, normalizarTexto } from "@/lib/texto";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
-const catKeys = Object.keys(CATEGORIAS) as Lancamento["categoria"][];
+// ─── Filtros e ordenação ─────────────────────────────────────────────────────
 
-const anoAtual = new Date().getFullYear();
-const ANOS = [anoAtual - 2, anoAtual - 1, anoAtual, anoAtual + 1];
+type Aba = "todos" | Categoria;
+type CampoOrdem = "data" | "valor" | "descricao" | "cartao" | "subcategoria";
 
-function getSubcategoria(valor: string | null | undefined) {
-  return SUBCATEGORIAS.find((s) => s.valor === valor) ?? null;
+interface Filtros {
+  aba: Aba;
+  busca: string;
+  subcategorias: string[];
+  cartoes: string[];
+  origens: OrigemLancamento[];
+  status: "todos" | "pago" | "pendente";
+  responsavel: string;
+  reembolso: "todos" | "sim" | "nao";
+  valorMin: number | null;
+  valorMax: number | null;
 }
 
-// Bolinha colorida de subcategoria
-function DotSubcategoria({ valor }: { valor: string | null | undefined }) {
-  const sub = getSubcategoria(valor);
-  if (!sub) return null;
+interface Ordenacao {
+  campo: CampoOrdem;
+  dir: "asc" | "desc";
+}
+
+const FILTROS_VAZIOS: Filtros = {
+  aba: "todos", busca: "", subcategorias: [], cartoes: [], origens: [], status: "todos", responsavel: "", reembolso: "todos", valorMin: null, valorMax: null,
+};
+const ORDEM_PADRAO: Ordenacao = { campo: "data", dir: "desc" };
+const CHAVE_FILTROS = "cf:lancamentos:filtros";
+const CHAVE_ORDEM = "cf:lancamentos:ordem";
+const TODOS = "__todos__";
+
+const ABAS: { valor: Aba; label: string }[] = [
+  { valor: "todos", label: "Todos" },
+  { valor: "entrada", label: "Entradas" },
+  { valor: "conta_fixa", label: "Contas Fixas" },
+  { valor: "cartao", label: "Cartão" },
+  { valor: "variavel", label: "Variáveis" },
+];
+const ORIGENS: { valor: OrigemLancamento; label: string }[] = [
+  { valor: "manual", label: "Manual" },
+  { valor: "parcela", label: "Parcela" },
+  { valor: "recorrente", label: "Recorrente" },
+  { valor: "importado", label: "Importado" },
+];
+const CAMPOS_ORDEM: { valor: CampoOrdem; label: string }[] = [
+  { valor: "data", label: "Data" },
+  { valor: "valor", label: "Valor" },
+  { valor: "descricao", label: "Descrição" },
+  { valor: "cartao", label: "Cartão" },
+  { valor: "subcategoria", label: "Subcategoria" },
+];
+
+const alternar = <T,>(lista: T[], item: T): T[] => (lista.includes(item) ? lista.filter((x) => x !== item) : [...lista, item]);
+
+const semIdentidade = ({ createdBy: _c, ...l }: Lancamento): NovoLancamento => l;
+
+const cabecalhoDia = (iso: string) => `${DIAS_SEMANA_CURTOS[parseISODate(iso).getDay()]}, ${formatDiaMes(iso)}`;
+
+// CSV com ";" e vírgula decimal, BOM UTF-8 para o Excel.
+function exportarCSV(itens: Lancamento[], nomeSub: (s: string | null) => string, nomeCartao: (id: string | null) => string, arquivo: string) {
+  const campo = (v: string) => (/[;"\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+  const linhas = [
+    ["Data", "Descrição", "Categoria", "Subcategoria", "Cartão", "Valor", "Status", "Responsável", "Origem", "Reembolso", "Observação"],
+    ...itens.map((l) => [
+      formatDataBR(l.data), l.descricao, CATEGORIAS[l.categoria], nomeSub(l.subcategoria), nomeCartao(l.cartaoId),
+      l.valor.toFixed(2).replace(".", ","), l.status, l.responsavel ?? "", l.origem, l.reembolso ? "sim" : "", l.observacao ?? "",
+    ]),
+  ];
+  const conteudo = String.fromCharCode(0xfeff) + linhas.map((l) => l.map(campo).join(";")).join("\r\n");
+  const url = URL.createObjectURL(new Blob([conteudo], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = arquivo;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ─── Componentes locais ──────────────────────────────────────────────────────
+
+interface OpcaoMulti {
+  valor: string;
+  label: string;
+  cor?: string;
+}
+
+function FiltroMulti({ titulo, opcoes, selecionados, onChange }: { titulo: string; opcoes: OpcaoMulti[]; selecionados: string[]; onChange: (v: string[]) => void }) {
   return (
-    <span
-      title={sub.label}
-      className="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full border"
-      style={{
-        backgroundColor: sub.cor + "18", // 10% de opacidade
-        borderColor: sub.cor + "50",
-        color: sub.cor,
-      }}
-    >
-      <span
-        className="inline-block h-2 w-2 rounded-full flex-shrink-0"
-        style={{ backgroundColor: sub.cor }}
-      />
-      {sub.label}
-    </span>
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" className={cn("h-8", selecionados.length > 0 && "border-primary text-primary")}>
+          {titulo}
+          {selecionados.length > 0 && <Badge variant="secondary" className="ml-1.5 h-5 px-1.5">{selecionados.length}</Badge>}
+          <ChevronDown className="h-3.5 w-3.5 ml-1" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-60 p-2 max-h-72 overflow-y-auto" align="start">
+        {opcoes.length === 0 && <p className="text-xs text-muted-foreground p-2">Nenhuma opção</p>}
+        {opcoes.map((o) => (
+          <label key={o.valor} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted cursor-pointer text-sm">
+            <Checkbox checked={selecionados.includes(o.valor)} onCheckedChange={() => onChange(alternar(selecionados, o.valor))} />
+            {o.cor ? <OpcaoCor cor={o.cor} label={o.label} /> : o.label}
+          </label>
+        ))}
+        {selecionados.length > 0 && (
+          <Button variant="ghost" size="sm" className="w-full mt-1 h-7" onClick={() => onChange([])}>Limpar</Button>
+        )}
+      </PopoverContent>
+    </Popover>
   );
 }
 
+// ─── Página ──────────────────────────────────────────────────────────────────
+
 export default function Lancamentos() {
   const {
-    mesSelecionado, setMesSelecionado,
-    anoSelecionado, setAnoSelecionado,
-    lancamentos, lancamentosMes, entradas, totalSaidas, saldo,
-    addLancamento, updateLancamento, deleteLancamento, loading,
+    loading, mesSelecionado, anoSelecionado, lancamentos, lancamentosMes, cartoes, subcategoriasAtivas, membros, parcelamentos,
+    entradas, reembolsos, totalSaidas, saldo, getCartao, getSubcategoria, resumoFatura, progressoParcelamento, statusLancamentoCartao,
+    inserirLancamentos, updateLancamentos, deleteLancamentos, salvarParcelamento,
   } = useFinanceData();
 
-  const [open, setOpen] = useState(false);
-  const [editando, setEditando] = useState<Lancamento | null>(null);
-  const [cat, setCat] = useState<Lancamento["categoria"]>("entrada");
-  const [subcat, setSubcat] = useState<string>("");
-  const [cartaoNome, setCartaoNome] = useState<string>(""); // ← NOVO: Estado para o nome do cartão
+  const [filtros, setFiltros] = useState<Filtros>(() => ({ ...FILTROS_VAZIOS, ...lerLocalStorage<Partial<Filtros>>(CHAVE_FILTROS, {}) }));
+  const [ordem, setOrdem] = useState<Ordenacao>(() => lerLocalStorage(CHAVE_ORDEM, ORDEM_PADRAO));
+  const [mostrarFiltros, setMostrarFiltros] = useState(false);
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
+  const [form, setForm] = useState<{ aberto: boolean; lancamento: Lancamento | null }>({ aberto: false, lancamento: null });
+  const [recorrentes, setRecorrentes] = useState<{ aberto: boolean; aPartirDe: Lancamento | null }>({ aberto: false, aPartirDe: null });
+  const [importar, setImportar] = useState(false);
+  const [excluindo, setExcluindo] = useState<Lancamento[] | null>(null);
+  const [confirmarCopia, setConfirmarCopia] = useState(false);
   const [copiando, setCopiando] = useState(false);
 
-  const abrirNovo = () => {
-    setEditando(null);
-    setCat("entrada");
-    setSubcat("");
-    setCartaoNome(""); // Limpa ao abrir novo
-    setOpen(true);
-  };
+  useEffect(() => gravarLocalStorage(CHAVE_FILTROS, filtros), [filtros]);
+  useEffect(() => gravarLocalStorage(CHAVE_ORDEM, ordem), [ordem]);
+  useEffect(() => setSelecionados(new Set()), [mesSelecionado, anoSelecionado]);
 
-  const abrirEdicao = (l: Lancamento) => {
-    setEditando(l);
-    setCat(l.categoria);
-    setSubcat(l.subcategoria ?? "");
-    setCartaoNome(l.cartao_nome ?? ""); // Carrega o nome ao editar
-    setOpen(true);
-  };
+  const setFiltro = <K extends keyof Filtros>(k: K, v: Filtros[K]) => setFiltros((f) => ({ ...f, [k]: v }));
+  const nomeSub = useCallback((slug: string | null) => getSubcategoria(slug)?.label ?? "", [getSubcategoria]);
+  const nomeCartao = useCallback((id: string | null) => getCartao(id)?.nome ?? "", [getCartao]);
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const fd = new FormData(e.currentTarget);
-    const descricao = fd.get("descricao") as string;
-    const valor = Number(fd.get("valor"));
-    const subcategoria = cat !== "entrada" && subcat ? subcat : null;
-    const cartao_nome = cat === "cartao" && cartaoNome ? cartaoNome.trim() : null; // Pega o valor do input livre
-
-    if (editando) {
-      await updateLancamento({ ...editando, descricao, valor, categoria: cat, subcategoria, cartao_nome });
-    } else {
-      await addLancamento({ descricao, valor, categoria: cat, mes: mesSelecionado, ano: anoSelecionado, subcategoria, cartao_nome });
-    }
-    setOpen(false);
-    setEditando(null);
-  };
-
-  const copiarParaProximoMes = async (l: Lancamento) => {
-    const proximoMes = l.mes === 11 ? 0 : l.mes + 1;
-    const proximoAno = l.mes === 11 ? l.ano + 1 : l.ano;
-    await addLancamento({
-      descricao: l.descricao,
-      valor: l.valor,
-      categoria: l.categoria,
-      subcategoria: l.subcategoria ?? null,
-      cartao_nome: l.cartao_nome ?? null, // Copia o nome do cartão também
-      mes: proximoMes,
-      ano: proximoAno,
+  // Filtros exceto aba (usados também nos contadores das abas).
+  const filtradosSemAba = useMemo(() => {
+    const busca = normalizarTexto(filtros.busca);
+    return lancamentosMes.filter((l) => {
+      if (busca && !normalizarTexto(`${l.descricao} ${l.observacao ?? ""}`).includes(busca)) return false;
+      if (filtros.subcategorias.length && !filtros.subcategorias.includes(l.subcategoria ?? "")) return false;
+      if (filtros.cartoes.length && !filtros.cartoes.includes(l.cartaoId ?? "")) return false;
+      if (filtros.origens.length && !filtros.origens.includes(l.origem)) return false;
+      if (filtros.status !== "todos" && l.status !== filtros.status) return false;
+      if (filtros.responsavel && l.responsavel !== filtros.responsavel) return false;
+      if (filtros.reembolso !== "todos" && l.reembolso !== (filtros.reembolso === "sim")) return false;
+      if (filtros.valorMin != null && l.valor < filtros.valorMin) return false;
+      if (filtros.valorMax != null && l.valor > filtros.valorMax) return false;
+      return true;
     });
-    toast.success(`Copiado para ${MESES[proximoMes]}/${proximoAno}`);
+  }, [lancamentosMes, filtros]);
+
+  const filtrados = useMemo(() => {
+    const daAba = filtros.aba === "todos" ? filtradosSemAba : filtradosSemAba.filter((l) => l.categoria === filtros.aba);
+    const chave: Record<CampoOrdem, (l: Lancamento) => string | number> = {
+      data: (l) => l.data,
+      valor: (l) => l.valor,
+      descricao: (l) => normalizarTexto(l.descricao),
+      cartao: (l) => normalizarTexto(nomeCartao(l.cartaoId)),
+      subcategoria: (l) => normalizarTexto(nomeSub(l.subcategoria)),
+    };
+    const f = chave[ordem.campo];
+    const sinal = ordem.dir === "asc" ? 1 : -1;
+    return [...daAba].sort((a, b) => {
+      const va = f(a);
+      const vb = f(b);
+      if (va === vb) return a.descricao.localeCompare(b.descricao);
+      return (va < vb ? -1 : 1) * sinal;
+    });
+  }, [filtradosSemAba, filtros.aba, ordem, nomeCartao, nomeSub]);
+
+  const totalFiltrado = sumMoney(filtrados.map((l) => l.valor));
+  const filtrosAtivos =
+    !!filtros.busca || filtros.subcategorias.length + filtros.cartoes.length + filtros.origens.length > 0 ||
+    filtros.status !== "todos" || !!filtros.responsavel || filtros.reembolso !== "todos" || filtros.valorMin != null || filtros.valorMax != null;
+
+  // Agrupamento por dia (estilo extrato) quando ordenado por data.
+  const grupos = useMemo(() => {
+    if (ordem.campo !== "data") return [{ titulo: null as string | null, itens: filtrados }];
+    return filtrados.reduce<{ titulo: string | null; itens: Lancamento[] }[]>((acc, l) => {
+      const titulo = cabecalhoDia(l.data);
+      const ultimo = acc[acc.length - 1];
+      if (ultimo?.titulo === titulo) ultimo.itens.push(l);
+      else acc.push({ titulo, itens: [l] });
+      return acc;
+    }, []);
+  }, [filtrados, ordem.campo]);
+
+  // Resumos da aba Cartão
+  const itensCartao = filtradosSemAba.filter((l) => l.categoria === "cartao");
+  const totaisPorCartao = useMemo(() => {
+    const mapa = itensCartao.reduce((m, l) => m.set(l.cartaoId ?? "", [...(m.get(l.cartaoId ?? "") ?? []), l.valor]), new Map<string, number[]>());
+    return [...mapa.entries()].map(([id, valores]) => ({
+      id,
+      total: sumMoney(valores),
+      vencimento: id ? resumoFatura(id, { mes: mesSelecionado, ano: anoSelecionado })?.dataVencimento ?? null : null,
+    }));
+  }, [itensCartao, resumoFatura, mesSelecionado, anoSelecionado]);
+  const totaisPorSubcategoria = subcategoriasAtivas
+    .map((s) => ({ ...s, total: sumMoney(itensCartao.filter((l) => l.subcategoria === s.slug).map((l) => l.valor)) }))
+    .filter((s) => s.total > 0);
+
+  // ─── Seleção e ações em massa ──────────────────────────────────────────
+
+  const selecionadosLista = filtrados.filter((l) => selecionados.has(l.id));
+  const todosMarcados = filtrados.length > 0 && selecionadosLista.length === filtrados.length;
+
+  const alternarSelecao = (id: string) =>
+    setSelecionados((prev) => {
+      const prox = new Set(prev);
+      if (prox.has(id)) prox.delete(id);
+      else prox.add(id);
+      return prox;
+    });
+
+  const aplicarEmLote = async (transformar: (l: Lancamento) => Lancamento, mensagem: string) => {
+    const ok = await updateLancamentos(selecionadosLista.map(transformar));
+    if (!ok) return;
+    toast.success(`${selecionadosLista.length} ${mensagem}`);
+    setSelecionados(new Set());
   };
 
-  const copiarDoMesAnterior = async () => {
-    const mesAnterior = mesSelecionado === 0 ? 11 : mesSelecionado - 1;
-    const anoAnterior = mesSelecionado === 0 ? anoSelecionado - 1 : anoSelecionado;
-    const fonte = lancamentos.filter((l) => l.mes === mesAnterior && l.ano === anoAnterior);
-    if (fonte.length === 0) {
-      toast.error(`Nenhum lançamento em ${MESES[mesAnterior]}/${anoAnterior}`);
+  const mudarCartaoEmLote = (cartaoId: string) => {
+    const cartao = getCartao(cartaoId);
+    aplicarEmLote((l) => {
+      if (l.categoria !== "cartao" || l.parcelamentoId) return l;
+      return { ...l, cartaoId, ...competenciaDoLancamento("cartao", parseISODate(l.data), cartao) };
+    }, "lançamento(s) de cartão atualizado(s) (parcelas não mudam)");
+  };
+
+  // ─── Exclusão com Desfazer ──────────────────────────────────────────────
+
+  const excluir = async (alvos: Lancamento[]) => {
+    setExcluindo(null);
+    const removidos = await deleteLancamentos(alvos.map((l) => l.id));
+    if (removidos.length === 0) return;
+    setSelecionados(new Set());
+    toast.success(`${removidos.length} lançamento(s) excluído(s)`, {
+      action: {
+        label: "Desfazer",
+        onClick: async () => {
+          const reinseridos = await inserirLancamentos(removidos.map(semIdentidade));
+          if (reinseridos) toast.success("Exclusão desfeita");
+        },
+      },
+    });
+  };
+
+  const excluirParcelaEProximas = async (l: Lancamento) => {
+    setExcluindo(null);
+    const p = parcelamentos.find((x) => x.id === l.parcelamentoId);
+    if (!p) return;
+    const payload = excluirAPartirDe(p, progressoParcelamento(p).lancamentos, l.parcelaNum ?? 1, statusLancamentoCartao);
+    if (await salvarParcelamento(payload)) toast.success(`Parcelas a partir da ${l.parcelaNum}ª excluídas`);
+  };
+
+  const parcelaUnica = excluindo?.length === 1 && excluindo[0].parcelamentoId ? excluindo[0] : null;
+
+  // ─── Copiar mês anterior ────────────────────────────────────────────────
+
+  const anterior = somarMeses(mesSelecionado, anoSelecionado, -1);
+  const fonteCopia = lancamentos.filter(
+    (l) => l.mes === anterior.mes && l.ano === anterior.ano && l.origem !== "parcela" && l.origem !== "recorrente" && !l.parcelamentoId && !l.recorrenciaId,
+  );
+
+  const pedirCopia = () => {
+    if (fonteCopia.length === 0) {
+      toast.error(`Nada para copiar de ${MESES[anterior.mes]}/${anterior.ano} (parcelas e recorrências são ignoradas)`);
       return;
     }
-    setCopiando(true);
-    for (const l of fonte) {
-      await addLancamento({
-        descricao: l.descricao,
-        valor: l.valor,
-        categoria: l.categoria,
-        subcategoria: l.subcategoria ?? null,
-        cartao_nome: l.cartao_nome ?? null,
-        mes: mesSelecionado,
-        ano: anoSelecionado,
-      });
-    }
-    setCopiando(false);
-    toast.success(`${fonte.length} lançamento(s) copiado(s) de ${MESES[mesAnterior]}!`);
+    if (lancamentosMes.length > 0) setConfirmarCopia(true);
+    else copiar();
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
-  }
+  const copiar = async () => {
+    setConfirmarCopia(false);
+    setCopiando(true);
+    const hojeIso = toISODate(new Date());
+    const novos: NovoLancamento[] = fonteCopia.map((l) => {
+      const d = parseISODate(l.data);
+      const alvo = somarMeses(d.getMonth(), d.getFullYear(), 1);
+      const novaData = new Date(alvo.ano, alvo.mes, Math.min(d.getDate(), ultimoDia(alvo.ano, alvo.mes)));
+      const iso = toISODate(novaData);
+      return {
+        ...semIdentidade(l),
+        id: undefined,
+        data: iso,
+        ...competenciaDoLancamento(l.categoria, novaData, getCartao(l.cartaoId)),
+        status: l.categoria === "conta_fixa" && iso > hojeIso ? "pendente" : l.status,
+        origem: "manual",
+      };
+    });
+    const inseridos = await inserirLancamentos(novos);
+    setCopiando(false);
+    if (inseridos) toast.success(`${inseridos.length} lançamento(s) copiado(s) de ${MESES[anterior.mes]}`);
+  };
+
+  if (loading) return <PaginaCarregando cards={3} />;
+
+  const contagemAba = (a: Aba) => (a === "todos" ? filtradosSemAba.length : filtradosSemAba.filter((l) => l.categoria === a).length);
 
   return (
     <div className="space-y-6">
       {/* Cabeçalho */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-display font-bold">Lançamentos Mensais</h2>
+          <h2 className="text-2xl font-display font-bold">Lançamentos</h2>
           <p className="text-muted-foreground text-sm">{MESES[mesSelecionado]} / {anoSelecionado}</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <Select value={String(anoSelecionado)} onValueChange={(v) => setAnoSelecionado(Number(v))}>
-            <SelectTrigger className="w-[100px]"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {ANOS.map((a) => <SelectItem key={a} value={String(a)}>{a}</SelectItem>)}
-            </SelectContent>
-          </Select>
-
-          <Select value={String(mesSelecionado)} onValueChange={(v) => setMesSelecionado(Number(v))}>
-            <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {MESES.map((m, i) => <SelectItem key={i} value={String(i)}>{m}</SelectItem>)}
-            </SelectContent>
-          </Select>
-
-          <Button variant="outline" onClick={copiarDoMesAnterior} disabled={copiando}>
-            {copiando
-              ? <Loader2 className="h-4 w-4 animate-spin mr-1" />
-              : <CopyPlus className="h-4 w-4 mr-1" />}
+          <Button variant="outline" size="sm" onClick={() => setRecorrentes({ aberto: true, aPartirDe: null })}>
+            <Repeat className="h-4 w-4 mr-1" /> Recorrentes
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setImportar(true)}>
+            <FileUp className="h-4 w-4 mr-1" /> Importar
+          </Button>
+          <Button variant="outline" size="sm" onClick={pedirCopia} disabled={copiando}>
+            {copiando ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <CopyPlus className="h-4 w-4 mr-1" />}
             Copiar mês anterior
           </Button>
-
-          {/* Modal novo/editar */}
-          <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setEditando(null); }}>
-            <DialogTrigger asChild>
-              <Button onClick={abrirNovo}><Plus className="h-4 w-4 mr-1" /> Novo</Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>{editando ? "Editar Lançamento" : "Novo Lançamento"}</DialogTitle>
-              </DialogHeader>
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <Label>Descrição</Label>
-                  <Input name="descricao" defaultValue={editando?.descricao} required />
-                </div>
-                <div>
-                  <Label>Valor (R$)</Label>
-                  <Input name="valor" type="number" step="0.01" defaultValue={editando?.valor} required />
-                </div>
-                <div>
-                  <Label>Categoria</Label>
-                  <Select value={cat} onValueChange={(v) => { setCat(v as Lancamento["categoria"]); setSubcat(""); }}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {catKeys.map((k) => <SelectItem key={k} value={k}>{CATEGORIAS[k]}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Subcategoria — aparece para qualquer saída */}
-                {cat !== "entrada" && (
-                    <div>
-                      <Label>Subcategoria (Tipo de gasto) <span className="text-muted-foreground text-xs font-normal">(opcional)</span></Label>
-                      <Select value={subcat} onValueChange={setSubcat}>
-                        <SelectTrigger><SelectValue placeholder="Selecione..." /></SelectTrigger>
-                        <SelectContent>
-                          {SUBCATEGORIAS.map((s) => (
-                            <SelectItem key={s.valor} value={s.valor}>
-                              <div className="flex items-center gap-2">
-                                <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: s.cor }} />
-                                {s.label}
-                              </div>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                )}
-
-                {/* Nome do Cartão — aparece só quando categoria é cartão */}
-                {cat === "cartao" && (
-                    <div>
-                      <Label>Nome do Cartão (Ex: Itau, Nubank) <span className="text-muted-foreground text-xs font-normal">(opcional)</span></Label>
-                      <Input 
-                        placeholder="Em qual cartão foi gasto?" 
-                        value={cartaoNome} 
-                        onChange={(e) => setCartaoNome(e.target.value)}
-                      />
-                    </div>
-                )}
-
-                <Button type="submit" className="w-full">
-                  {editando ? "Salvar alterações" : "Adicionar"}
-                </Button>
-              </form>
-            </DialogContent>
-          </Dialog>
+          <Button size="sm" onClick={() => setForm({ aberto: true, lancamento: null })}>
+            <Plus className="h-4 w-4 mr-1" /> Novo
+          </Button>
         </div>
       </div>
 
       {/* Resumo */}
       <div className="grid grid-cols-3 gap-3">
-        <div className="finance-card text-center">
+        <div className="finance-card text-center p-3 sm:p-5">
           <p className="stat-label">Entradas</p>
-          <p className="text-lg font-bold text-success">{formatCurrency(entradas)}</p>
+          <p className="text-base sm:text-lg font-bold text-success">{formatCurrency(entradas)}</p>
+          {reembolsos > 0 && <p className="text-[11px] text-muted-foreground">reembolsos {formatCurrency(reembolsos)}</p>}
         </div>
-        <div className="finance-card text-center">
+        <div className="finance-card text-center p-3 sm:p-5">
           <p className="stat-label">Saídas</p>
-          <p className="text-lg font-bold text-destructive">{formatCurrency(totalSaidas)}</p>
+          <p className="text-base sm:text-lg font-bold text-destructive">{formatCurrency(totalSaidas)}</p>
         </div>
-        <div className="finance-card text-center">
+        <div className="finance-card text-center p-3 sm:p-5">
           <p className="stat-label">Saldo</p>
-          <p className={`text-lg font-bold ${saldo >= 0 ? "text-success" : "text-destructive"}`}>
-            {formatCurrency(saldo)}
-          </p>
+          <p className={cn("text-base sm:text-lg font-bold", saldo >= 0 ? "text-success" : "text-destructive")}>{formatCurrency(saldo)}</p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">
-      {/* Tabs por categoria */}
-      <Tabs defaultValue="entrada">
-        <TabsList className="w-full flex flex-wrap h-auto gap-1">
-          {catKeys.map((k) => (
-            <TabsTrigger key={k} value={k} className="text-xs flex-1 min-w-[100px]">
-              {CATEGORIAS[k]}
-            </TabsTrigger>
-          ))}
-        </TabsList>
+        <div className="space-y-3 min-w-0">
+          {/* Abas-filtro */}
+          <Tabs value={filtros.aba} onValueChange={(v) => setFiltro("aba", v as Aba)}>
+            <TabsList className="w-full flex flex-wrap h-auto gap-1">
+              {ABAS.map((a) => (
+                <TabsTrigger key={a.valor} value={a.valor} className="text-xs flex-1 min-w-[80px]">
+                  {a.label} <span className="ml-1 text-muted-foreground">({contagemAba(a.valor)})</span>
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
 
-        {catKeys.map((k) => {
-          const items = lancamentosMes.filter((l) => l.categoria === k);
-          const total = items.reduce((s, l) => s + l.valor, 0);
-
-          // Mantive o seu resumo original por subcategoria
-          const subcatTotais = k !== "entrada"
-            ? SUBCATEGORIAS.map((s) => ({
-                ...s,
-                total: items
-                  .filter((l) => l.subcategoria === s.valor)
-                  .reduce((acc, l) => acc + l.valor, 0),
-              })).filter((s) => s.total > 0)
-            : [];
-
-          // ← NOVO: Cálculo dos totais por Nome de Cartão
-          const totaisPorNomeCartao = k === "cartao"
-            ? Array.from(
-                items.reduce((mapa, l) => {
-                  const nome = l.cartao_nome || "Sem Cartão";
-                  mapa.set(nome, (mapa.get(nome) || 0) + l.valor);
-                  return mapa;
-                }, new Map<string, number>()).entries()
-              ).map(([nome, total]) => ({ nome, total }))
-            : [];
-
-          return (
-            <TabsContent key={k} value={k}>
-              <div className="finance-card">
-                <div className="flex justify-between mb-3">
-                  <h3 className="font-semibold">{CATEGORIAS[k]}</h3>
-                  <span className="font-bold">{formatCurrency(total)}</span>
-                </div>
-
-                {/* Mini-resumo por subcategoria (O seu original, mantido!) */}
-                {subcatTotais.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mb-2">
-                    {subcatTotais.map((s) => (
-                      <div
-                        key={s.valor}
-                        className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border"
-                        style={{
-                          backgroundColor: s.cor + "18",
-                          borderColor: s.cor + "50",
-                          color: s.cor,
-                        }}
-                      >
-                        <span className="h-2 w-2 rounded-full flex-shrink-0" style={{ backgroundColor: s.cor }} />
-                        <span className="font-medium">{s.label}</span>
-                        <span className="font-bold">{formatCurrency(s.total)}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* ← NOVO: Resumo de gastos por Cartão (adicionado logo abaixo das suas subcategorias) */}
-                {k === "cartao" && totaisPorNomeCartao.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mb-4 pb-3 border-b border-dashed">
-                    {totaisPorNomeCartao.map((c) => (
-                      <div
-                        key={c.nome}
-                        className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border bg-muted/30"
-                      >
-                        <span className="font-medium text-muted-foreground">{c.nome}:</span>
-                        <span className="font-bold">{formatCurrency(c.total)}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Se não for cartão, a gente mantém a linha sutil do seu design original */}
-                {k !== "cartao" && <div className="mb-4 pb-3 border-b border-transparent" />}
-
-                {items.length === 0 ? (
-                  <p className="text-muted-foreground text-sm">Nenhum lançamento nesta categoria.</p>
-                ) : (
-                  <div className="divide-y">
-                    {items.map((l) => (
-                      <div key={l.id} className="flex items-center justify-between py-2.5 gap-2">
-                        <div className="flex items-center gap-2 flex-1 min-w-0">
-                          <DotSubcategoria valor={l.subcategoria} />
-                          <span className="text-sm truncate">{l.descricao}</span>
-                          
-                          {/* ← NOVO: Tag sutil mostrando de qual cartão é a compra */}
-                          {k === "cartao" && l.cartao_nome && (
-                            <span className="text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded ml-1 font-medium">
-                              {l.cartao_nome}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1 shrink-0">
-                          <span className="font-medium text-sm">{formatCurrency(l.valor)}</span>
-                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => abrirEdicao(l)} title="Editar">
-                            <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => copiarParaProximoMes(l)} title="Copiar para o próximo mês">
-                            <Copy className="h-3.5 w-3.5 text-muted-foreground" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => deleteLancamento(l.id)} title="Excluir">
-                            <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+          {/* Busca, filtros e ordenação */}
+          <div className="finance-card p-3 space-y-3">
+            <div className="flex flex-wrap gap-2">
+              <div className="relative flex-1 min-w-[180px]">
+                <Search className="h-4 w-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  className="h-8 pl-8"
+                  placeholder="Buscar descrição ou observação"
+                  value={filtros.busca}
+                  onChange={(e) => setFiltro("busca", e.target.value)}
+                />
               </div>
-            </TabsContent>
-          );
-        })}
-      </Tabs>
+              <Button variant={mostrarFiltros ? "secondary" : "outline"} size="sm" className="h-8" onClick={() => setMostrarFiltros(!mostrarFiltros)}>
+                <Filter className="h-3.5 w-3.5 mr-1" /> Filtros
+              </Button>
+              <Select value={ordem.campo} onValueChange={(v) => setOrdem((o) => ({ ...o, campo: v as CampoOrdem }))}>
+                <SelectTrigger className="h-8 w-[130px] text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {CAMPOS_ORDEM.map((c) => <SelectItem key={c.valor} value={c.valor}>{c.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8"
+                onClick={() => setOrdem((o) => ({ ...o, dir: o.dir === "asc" ? "desc" : "asc" }))}
+                title={ordem.dir === "asc" ? "Crescente" : "Decrescente"}
+              >
+                <ArrowDownUp className="h-3.5 w-3.5 mr-1" /> {ordem.dir === "asc" ? "Asc" : "Desc"}
+              </Button>
+            </div>
 
-      <OrcamentoCategorias className="lg:sticky lg:top-4" />
+            {mostrarFiltros && (
+              <div className="flex flex-wrap gap-2 items-end">
+                <FiltroMulti
+                  titulo="Subcategorias"
+                  opcoes={subcategoriasAtivas.map((s) => ({ valor: s.slug, label: s.label, cor: s.cor }))}
+                  selecionados={filtros.subcategorias}
+                  onChange={(v) => setFiltro("subcategorias", v)}
+                />
+                <FiltroMulti
+                  titulo="Cartões"
+                  opcoes={cartoes.map((c) => ({ valor: c.id, label: c.nome, cor: c.cor ?? "#64748B" }))}
+                  selecionados={filtros.cartoes}
+                  onChange={(v) => setFiltro("cartoes", v)}
+                />
+                <FiltroMulti
+                  titulo="Origem"
+                  opcoes={ORIGENS}
+                  selecionados={filtros.origens}
+                  onChange={(v) => setFiltro("origens", v as OrigemLancamento[])}
+                />
+                <Select value={filtros.status} onValueChange={(v) => setFiltro("status", v as Filtros["status"])}>
+                  <SelectTrigger className="h-8 w-[120px] text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todos">Status: todos</SelectItem>
+                    <SelectItem value="pago">Pago</SelectItem>
+                    <SelectItem value="pendente">Pendente</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={filtros.responsavel || TODOS} onValueChange={(v) => setFiltro("responsavel", v === TODOS ? "" : v)}>
+                  <SelectTrigger className="h-8 w-[150px] text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={TODOS}>Responsável: todos</SelectItem>
+                    {membros.map((m) => <SelectItem key={m.userId} value={m.nome}>{m.nome}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Select value={filtros.reembolso} onValueChange={(v) => setFiltro("reembolso", v as Filtros["reembolso"])}>
+                  <SelectTrigger className="h-8 w-[150px] text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todos">Reembolso: todos</SelectItem>
+                    <SelectItem value="sim">Só reembolsos</SelectItem>
+                    <SelectItem value="nao">Sem reembolsos</SelectItem>
+                  </SelectContent>
+                </Select>
+                <div className="flex items-end gap-1">
+                  <div>
+                    <Label className="text-[11px] text-muted-foreground">Mín.</Label>
+                    <MoneyInput className="h-8 w-[110px] text-xs" value={filtros.valorMin} onChange={(v) => setFiltro("valorMin", v || null)} />
+                  </div>
+                  <div>
+                    <Label className="text-[11px] text-muted-foreground">Máx.</Label>
+                    <MoneyInput className="h-8 w-[110px] text-xs" value={filtros.valorMax} onChange={(v) => setFiltro("valorMax", v || null)} />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span>
+                {filtrados.length} lançamento(s) · total <strong className="text-foreground">{formatCurrency(totalFiltrado)}</strong>
+              </span>
+              <div className="flex gap-1">
+                {filtrosAtivos && (
+                  <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setFiltros((f) => ({ ...FILTROS_VAZIOS, aba: f.aba }))}>
+                    <X className="h-3.5 w-3.5 mr-1" /> Limpar filtros
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs"
+                  disabled={filtrados.length === 0}
+                  onClick={() => exportarCSV(filtrados, nomeSub, nomeCartao, `lancamentos-${anoSelecionado}-${String(mesSelecionado + 1).padStart(2, "0")}.csv`)}
+                >
+                  <Download className="h-3.5 w-3.5 mr-1" /> Exportar CSV
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          {/* Resumo da aba Cartão */}
+          {filtros.aba === "cartao" && (totaisPorCartao.length > 0 || totaisPorSubcategoria.length > 0) && (
+            <div className="finance-card p-3 space-y-2">
+              <div className="flex flex-wrap gap-2">
+                {totaisPorCartao.map((c) => (
+                  <div key={c.id || "sem"} className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border bg-muted/30">
+                    {c.id ? <CartaoChip cartaoId={c.id} /> : <span className="font-medium text-muted-foreground">Sem cartão</span>}
+                    <span className="font-bold">{formatCurrency(c.total)}</span>
+                    {c.vencimento && <span className="text-muted-foreground">· vence {formatDiaMesData(c.vencimento)}</span>}
+                  </div>
+                ))}
+              </div>
+              {totaisPorSubcategoria.length > 0 && (
+                <div className="flex flex-wrap gap-2 pt-2 border-t border-dashed">
+                  {totaisPorSubcategoria.map((s) => (
+                    <ChipCor key={s.slug} cor={s.cor} label={s.label} className="text-xs px-2.5 py-1">
+                      <span className="font-bold">{formatCurrency(s.total)}</span>
+                    </ChipCor>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Barra de ações em massa */}
+          {selecionadosLista.length > 0 && (
+            <div className="sticky top-2 z-10 finance-card p-2 flex flex-wrap items-center gap-2 border-primary/40 shadow-md">
+              <span className="text-xs font-medium px-1">{selecionadosLista.length} selecionado(s)</span>
+              <Select value="" onValueChange={(v) => aplicarEmLote((l) => (l.categoria === "entrada" ? l : { ...l, subcategoria: v }), "lançamento(s) atualizado(s)")}>
+                <SelectTrigger className="h-8 w-[150px] text-xs"><SelectValue placeholder="Subcategoria..." /></SelectTrigger>
+                <SelectContent>
+                  {subcategoriasAtivas.map((s) => <SelectItem key={s.slug} value={s.slug}><OpcaoCor cor={s.cor} label={s.label} /></SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value="" onValueChange={mudarCartaoEmLote}>
+                <SelectTrigger className="h-8 w-[130px] text-xs"><SelectValue placeholder="Cartão..." /></SelectTrigger>
+                <SelectContent>
+                  {cartoes.filter((c) => c.ativo).map((c) => <SelectItem key={c.id} value={c.id}><OpcaoCor cor={c.cor ?? "#64748B"} label={c.nome} /></SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value="" onValueChange={(v) => aplicarEmLote((l) => ({ ...l, responsavel: v === TODOS ? null : v }), "lançamento(s) atualizado(s)")}>
+                <SelectTrigger className="h-8 w-[140px] text-xs"><SelectValue placeholder="Responsável..." /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={TODOS}>Sem responsável</SelectItem>
+                  {membros.map((m) => <SelectItem key={m.userId} value={m.nome}>{m.nome}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => aplicarEmLote((l) => ({ ...l, status: "pago" }), "marcado(s) como pago(s)")}>
+                Pago
+              </Button>
+              <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => aplicarEmLote((l) => ({ ...l, status: "pendente" }), "marcado(s) como pendente(s)")}>
+                Pendente
+              </Button>
+              <Button variant="destructive" size="sm" className="h-8 text-xs" onClick={() => setExcluindo(selecionadosLista)}>
+                <Trash2 className="h-3.5 w-3.5 mr-1" /> Excluir
+              </Button>
+              <Button variant="ghost" size="icon" className="h-8 w-8 ml-auto" onClick={() => setSelecionados(new Set())} aria-label="Limpar seleção">
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+
+          {/* Lista */}
+          <div className="finance-card p-0 overflow-hidden">
+            {filtrados.length === 0 ? (
+              <EstadoVazio
+                icone={Receipt}
+                titulo={lancamentosMes.length === 0 ? "Nenhum lançamento neste mês" : "Nenhum lançamento com esses filtros"}
+                descricao={lancamentosMes.length === 0 ? "Adicione um lançamento, importe um extrato ou copie o mês anterior." : undefined}
+                acao={
+                  lancamentosMes.length === 0 ? (
+                    <Button size="sm" onClick={() => setForm({ aberto: true, lancamento: null })}><Plus className="h-4 w-4 mr-1" /> Novo lançamento</Button>
+                  ) : (
+                    <Button size="sm" variant="outline" onClick={() => setFiltros(FILTROS_VAZIOS)}>Limpar filtros</Button>
+                  )
+                }
+              />
+            ) : (
+              <>
+                <label className="flex items-center gap-2 px-3 py-2 border-b text-xs text-muted-foreground cursor-pointer">
+                  <Checkbox
+                    checked={todosMarcados}
+                    onCheckedChange={(v) => setSelecionados(v === true ? new Set(filtrados.map((l) => l.id)) : new Set())}
+                  />
+                  Selecionar todos
+                </label>
+                {grupos.map((g, gi) => (
+                  <div key={g.titulo ?? gi}>
+                    {g.titulo && (
+                      <div className="flex justify-between px-3 py-1.5 bg-muted/50 text-xs font-medium text-muted-foreground">
+                        <span>{g.titulo}</span>
+                        <span>{formatCurrency(sumMoney(g.itens.map((l) => (l.categoria === "entrada" ? l.valor : -l.valor))))}</span>
+                      </div>
+                    )}
+                    <div className="divide-y">
+                      {g.itens.map((l) => (
+                        <LinhaLancamento
+                          key={l.id}
+                          l={l}
+                          totalParcelas={parcelamentos.find((p) => p.id === l.parcelamentoId)?.parcelas}
+                          selecionado={selecionados.has(l.id)}
+                          onSelecionar={() => alternarSelecao(l.id)}
+                          onEditar={() => setForm({ aberto: true, lancamento: l })}
+                          onRecorrente={() => setRecorrentes({ aberto: true, aPartirDe: l })}
+                          onExcluir={() => setExcluindo([l])}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        </div>
+
+        <OrcamentoCategorias className="lg:sticky lg:top-4" />
+      </div>
+
+      <LancamentoForm
+        open={form.aberto}
+        onOpenChange={(v) => setForm((f) => ({ ...f, aberto: v }))}
+        lancamento={form.lancamento}
+      />
+      <RecorrenciasDialog
+        open={recorrentes.aberto}
+        onOpenChange={(v) => setRecorrentes((r) => ({ ...r, aberto: v }))}
+        aPartirDe={recorrentes.aPartirDe}
+      />
+      <ImportarExtratoDialog open={importar} onOpenChange={setImportar} />
+
+      {/* Excluir */}
+      <AlertDialog open={!!excluindo} onOpenChange={(v) => !v && setExcluindo(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {parcelaUnica
+                ? `Excluir parcela ${parcelaUnica.parcelaNum}/${parcelamentos.find((p) => p.id === parcelaUnica.parcelamentoId)?.parcelas ?? "?"}?`
+                : `Excluir ${excluindo?.length ?? 0} lançamento(s)?`}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {parcelaUnica
+                ? `"${parcelaUnica.descricao}" faz parte de um parcelamento. Excluir só esta parcela ou também as próximas ainda não pagas?`
+                : "Você poderá desfazer logo após a exclusão."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            {parcelaUnica ? (
+              <>
+                <Button variant="outline" onClick={() => excluir([parcelaUnica])}>Só esta</Button>
+                <AlertDialogAction
+                  onClick={() => excluirParcelaEProximas(parcelaUnica)}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  Esta e as próximas
+                </AlertDialogAction>
+              </>
+            ) : (
+              <AlertDialogAction
+                onClick={() => excluindo && excluir(excluindo)}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                Excluir
+              </AlertDialogAction>
+            )}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Copiar mês anterior */}
+      <AlertDialog open={confirmarCopia} onOpenChange={setConfirmarCopia}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Copiar {fonteCopia.length} lançamento(s) de {MESES[anterior.mes]}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Já existem {lancamentosMes.length} lançamentos neste mês. Copiar mesmo assim? Parcelas e recorrências não são copiadas.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={copiar}>Copiar mesmo assim</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+interface LinhaLancamentoProps {
+  l: Lancamento;
+  totalParcelas?: number;
+  selecionado: boolean;
+  onSelecionar: () => void;
+  onEditar: () => void;
+  onRecorrente: () => void;
+  onExcluir: () => void;
+}
+
+function LinhaLancamento({ l, totalParcelas, selecionado, onSelecionar, onEditar, onRecorrente, onExcluir }: LinhaLancamentoProps) {
+  const pendente = l.status === "pendente";
+  const entrada = l.categoria === "entrada";
+  return (
+    <div className={cn("flex items-start gap-2 px-3 py-2.5", pendente && "border-l-2 border-l-warning bg-warning/5", selecionado && "bg-primary/5")}>
+      <Checkbox checked={selecionado} onCheckedChange={onSelecionar} className="mt-0.5" aria-label="Selecionar" />
+      <span className="text-xs text-muted-foreground w-10 shrink-0 mt-0.5">{formatDiaMes(l.data)}</span>
+      <div className="flex-1 min-w-0 space-y-1">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="text-sm truncate">{l.descricao}</span>
+          {l.responsavel && (
+            <span
+              title={l.responsavel}
+              className="h-5 w-5 shrink-0 rounded-full bg-secondary text-secondary-foreground text-[9px] font-bold flex items-center justify-center"
+            >
+              {iniciais(l.responsavel)}
+            </span>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-1">
+          <SubcategoriaChip slug={l.subcategoria} className="text-[10px] py-0" />
+          <CartaoChip cartaoId={l.cartaoId} className="text-[10px] py-0" />
+          {l.parcelamentoId && (
+            <Link
+              to={`/parcelamentos#${l.parcelamentoId}`}
+              className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-primary/10 text-primary hover:underline"
+            >
+              Parcela {l.parcelaNum}/{totalParcelas ?? "?"}
+            </Link>
+          )}
+          {!l.parcelamentoId && l.recorrenciaId && (
+            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground inline-flex items-center gap-0.5">
+              <Repeat className="h-2.5 w-2.5" /> Recorrente
+            </span>
+          )}
+          {l.origem === "importado" && <span className="text-[10px] text-muted-foreground">importado</span>}
+          {entrada && l.reembolso && (
+            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-success/10 text-success">Reembolso</span>
+          )}
+          {pendente && (
+            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-warning/20 text-warning-foreground">Pendente</span>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center gap-0.5 shrink-0">
+        <span className={cn("font-medium text-sm whitespace-nowrap mr-1", entrada ? "text-success" : "")}>
+          {entrada ? "+" : ""}{formatCurrency(l.valor)}
+        </span>
+        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onEditar} title="Editar">
+          <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+        </Button>
+        {!l.parcelamentoId && !l.recorrenciaId && (
+          <Button variant="ghost" size="icon" className="h-7 w-7 hidden sm:inline-flex" onClick={onRecorrente} title="Tornar recorrente">
+            <Repeat className="h-3.5 w-3.5 text-muted-foreground" />
+          </Button>
+        )}
+        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onExcluir} title="Excluir">
+          <Trash2 className="h-3.5 w-3.5 text-destructive" />
+        </Button>
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useFinanceData } from "@/lib/finance-store";
+import { useContextoIA } from "@/hooks/useContextoIA";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Sparkles, Loader2, LineChart, AlertCircle, Target, Lightbulb } from "lucide-react";
@@ -15,8 +16,8 @@ type AnaliseFinanceira = {
 };
 
 export function ConsultorIA() {
-  // Agora puxamos também parcelamentos e prioridades do seu estado global
-  const { lancamentosMes, metas, parcelamentos, prioridades, saldo, totalSaidas, entradas } = useFinanceData();
+  const { lancamentosMes } = useFinanceData();
+  const montarContexto = useContextoIA();
   const [analise, setAnalise] = useState<AnaliseFinanceira | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -28,17 +29,8 @@ export function ConsultorIA() {
 
     setLoading(true);
     try {
-      // Limpeza de dados para economizar tokens e focar no que importa
-      const payload = {
-        lancamentos: lancamentosMes.map(l => ({ desc: l.descricao, valor: l.valor, cat: l.categoria, subcat: l.subcategoria })),
-        metas: metas.map(m => ({ nome: m.nome, atual: m.valorAtual, alvo: m.valorMeta })),
-        parcelamentos: parcelamentos.map(p => ({ desc: p.descricao, valor_mensal: p.valorParcela, total: p.valorTotal })),
-        prioridades: prioridades.map(p => ({ desc: p.descricao, valor: p.valor, nivel: p.prioridade })),
-        resumo: { entradas, totalSaidas, saldo }
-      };
-
       const { data, error } = await supabase.functions.invoke('consultor-financeiro', {
-        body: payload
+        body: montarContexto()
       });
 
       if (error) throw error;

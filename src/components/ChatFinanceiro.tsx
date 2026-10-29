@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { useFinanceData } from "@/lib/finance-store";
+import { useAuth } from "@/hooks/useAuth";
+import { useContextoIA } from "@/hooks/useContextoIA";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -14,6 +15,9 @@ type Message = {
   content: string;
 };
 
+// Histórico enviado à IA: só as últimas mensagens, para limitar tokens.
+const LIMITE_HISTORICO = 20;
+
 type Conversa = {
   id: string;
   titulo: string;
@@ -21,8 +25,9 @@ type Conversa = {
 };
 
 export function ChatFinanceiro() {
-  const { entradas, totalSaidas, saldo, metas, parcelamentos, prioridades } = useFinanceData();
-  
+  const { householdId } = useAuth();
+  const montarContexto = useContextoIA();
+
   const [conversas, setConversas] = ConversaState();
   const [conversaAtiva, setConversaAtiva] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -108,18 +113,6 @@ export function ChatFinanceiro() {
     try {
       // Se for a primeira mensagem de uma nova conversa, cria o registro no banco
       if (!currentConversationId) {
-        // Pega o household_id do usuário logado através da tabela de metas ou outra existente, ou cria direto
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) throw new Error("Usuário não autenticado");
-
-        // Descobre o household_id associado ao usuário
-        const { data: profileData } = await supabase
-          .from('metas') // ou qualquer tabela que tenha household_id para pegar o ID rapidamente
-          .select('household_id')
-          .limit(1)
-          .single();
-
-        const householdId = profileData?.household_id;
         if (!householdId) throw new Error("Household não encontrado.");
 
         const tituloGerado = userMsg.content.slice(0, 30) + "...";
@@ -136,24 +129,15 @@ export function ChatFinanceiro() {
       }
 
       // Salva a mensagem do usuário no banco
-      await supabase.from('mensagens_chat').insert([
+      const { error: errMsg } = await supabase.from('mensagens_chat').insert([
         { conversa_id: currentConversationId, role: 'user', content: userMsg.content }
       ]);
-
-      // Monta o contexto para a Edge Function
-      const contextoFinanceiro = {
-        entradas,
-        totalSaidas,
-        saldo,
-        metas: metas.map(m => ({ nome: m.nome, atual: m.valorAtual, alvo: m.valorMeta })),
-        parcelamentos: parcelamentos.map(p => ({ desc: p.descricao, valor_mensal: p.valorParcela, total: p.valorTotal })),
-        prioridades: prioridades.map(p => ({ desc: p.descricao, nivel: p.prioridade, valor: p.valor }))
-      };
+      if (errMsg) throw errMsg;
 
       const { data, error } = await supabase.functions.invoke('chat-financeiro', {
-        body: { 
-          messages: newMessages,
-          contextoFinanceiro 
+        body: {
+          messages: newMessages.slice(-LIMITE_HISTORICO),
+          contextoFinanceiro: montarContexto(),
         }
       });
 
@@ -164,9 +148,10 @@ export function ChatFinanceiro() {
         setMessages(prev => [...prev, aiReply]);
 
         // Salva a resposta da IA no banco
-        await supabase.from('mensagens_chat').insert([
+        const { error: errResposta } = await supabase.from('mensagens_chat').insert([
           { conversa_id: currentConversationId, role: 'model', content: data.reply }
         ]);
+        if (errResposta) toast.error("Resposta recebida, mas não foi salva no histórico.");
       } else {
         throw new Error("Resposta inválida da IA");
       }
