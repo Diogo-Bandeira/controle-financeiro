@@ -14,23 +14,12 @@
 - Risk: Edge Functions accept totals/lists from browser instead of reading DB with user JWT. Not a leak, but AI output can be fed fabricated data; and server can't enforce scope.
 - Fix approach: in function, create Supabase client with caller's `Authorization` header and query data server-side.
 
-**Chat tables not under version control:**
-- Risk: RLS policies for `conversas_chat`/`mensagens_chat` unknown/unreviewable — possible cross-household read if created without policies.
-- Files: no migration; used in `src/components/ChatFinanceiro.tsx`
-- Recommendations: `supabase db pull` / write migration with RLS (`household_id` / join via `conversa_id`).
-
 ## Tech Debt
 
 **Pre-existing lint/type errors:**
-- Issue: `npm run lint` → 8 errors (`no-explicit-any` in `src/`, `supabase/`; `no-require-imports` in `tailwind.config.ts`). `tsc -p tsconfig.app.json` fails only on `ConsultorIA.tsx:84` (`analise.alerta` not in type).
-- Impact: gates can't be green until fixed; `vite build` doesn't typecheck, so it passes anyway.
-- Fix approach: fix `alerta` usage; replace `any` with real types.
-
-**Schema drift (migrations ≠ live DB):**
-- Issue: `lancamentos.subcategoria`, `lancamentos.cartao_nome`, `conversas_chat`, `mensagens_chat` absent from migration. `types.ts` regenerated from live DB 2026-10-18 (correct).
-- Files: `supabase/migrations/*`
-- Impact: fresh env (`supabase db reset`) breaks app.
-- Fix approach: `supabase db pull` → migration.
+- Issue: `npm run lint` → 6 errors (`no-explicit-any` in `src/`, `supabase/`; `no-empty-object-type`; `no-require-imports` in `tailwind.config.ts`). `tsc -p tsconfig.app.json` passes.
+- Impact: lint gate can't be green until fixed.
+- Fix approach: replace `any` with real types.
 
 **Duplicated domain constants/types:**
 - Issue: entity mapping snake→camel repeated in load + insert per entity (`finance-store.ts`).
