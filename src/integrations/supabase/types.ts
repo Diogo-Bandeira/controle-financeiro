@@ -818,14 +818,50 @@ export type Database = {
       get_user_household_id: { Args: { _user_id: string }; Returns: string }
       inserir_lancamentos: {
         Args: { p_lancamentos: Json }
-        Returns: Database["public"]["Tables"]["lancamentos"]["Row"][]
+        Returns: {
+          ano: number
+          cartao_id: string | null
+          cartao_nome: string | null
+          categoria: string
+          created_at: string
+          created_by: string | null
+          data: string
+          descricao: string
+          household_id: string
+          id: string
+          mes: number
+          observacao: string | null
+          origem: string
+          parcela_num: number | null
+          parcelamento_id: string | null
+          recorrencia_id: string | null
+          reembolso: boolean
+          responsavel: string | null
+          status: string
+          subcategoria: string | null
+          updated_at: string
+          valor: number
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "lancamentos"
+          isOneToOne: false
+          isSetofReturn: true
+        }
       }
       normalizar_nome_cartao: { Args: { _nome: string }; Returns: string }
       salvar_parcelamento: {
-        Args: { p_apagar_ids?: string[]; p_lancamentos?: Json; p_parcelamento: Json }
+        Args: {
+          p_apagar_ids?: string[]
+          p_lancamentos?: Json
+          p_parcelamento: Json
+        }
         Returns: Json
       }
-      seed_subcategorias: { Args: { _household_id: string }; Returns: undefined }
+      seed_subcategorias: {
+        Args: { _household_id: string }
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never
