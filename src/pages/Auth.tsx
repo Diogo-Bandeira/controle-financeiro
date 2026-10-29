@@ -36,8 +36,8 @@ export default function Auth() {
         if (error) throw error;
         toast.success("Conta criada! Verifique seu email para confirmar.");
       }
-    } catch (err: any) {
-      toast.error(err.message || "Erro na autenticação");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro na autenticação");
     } finally {
       setLoading(false);
     }
@@ -54,8 +54,8 @@ export default function Auth() {
         },
       });
       if (error) throw error;
-    } catch (err: any) {
-      toast.error(err.message || "Erro ao entrar com Google");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao entrar com Google");
       setLoading(false);
     }
   };
