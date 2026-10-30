@@ -83,5 +83,5 @@ Tema (`next-themes`, classe `.dark`), ocultar valores (`formatCurrency` → `R$ 
 
 ## Code Organization
 
-**Approach:** Layer-based: `pages/` (telas), `components/` (layout, forms, widgets, chips), `components/ui/` (shadcn), `hooks/`, `lib/` (domínio puro + store), `integrations/supabase/` (client + types mantidos à mão até regenerar).
+**Approach:** Layer-based: `pages/` (telas), `components/` (layout, forms, widgets, chips), `components/ui/` (shadcn), `hooks/`, `lib/` (domínio puro + store), `integrations/supabase/` (client + types gerados por `supabase gen types`).
 **Module boundaries:** páginas acessam dados via `useFinanceData()`; exceções: `ChatFinanceiro` (tabelas de chat), `ConsultorIA`/Chat (functions.invoke), `useAuth`, `Auth.tsx`.
