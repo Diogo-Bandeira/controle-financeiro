@@ -16,9 +16,6 @@
 
 ## Tech Debt
 
-**Generated types hand-edited:**
-- `src/integrations/supabase/types.ts` foi atualizado à mão para a migration `20261030120000` (`recorrencias_excecoes`, `atualizar_recorrencia_futuros`). Regenerar com `supabase gen types` após aplicar.
-
 **`lancamentos.cartao_nome` obsoleta:**
 - Mantida no banco após backfill para `cartao_id`; o app não usa mais. Remover numa migration futura.
 
