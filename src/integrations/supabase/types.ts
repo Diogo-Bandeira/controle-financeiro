@@ -752,6 +752,48 @@ export type Database = {
           },
         ]
       }
+      recorrencias_excecoes: {
+        Row: {
+          ano: number
+          created_at: string
+          household_id: string
+          id: string
+          mes: number
+          recorrencia_id: string
+        }
+        Insert: {
+          ano: number
+          created_at?: string
+          household_id: string
+          id?: string
+          mes: number
+          recorrencia_id: string
+        }
+        Update: {
+          ano?: number
+          created_at?: string
+          household_id?: string
+          id?: string
+          mes?: number
+          recorrencia_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "recorrencias_excecoes_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "recorrencias_excecoes_recorrencia_id_fkey"
+            columns: ["recorrencia_id"]
+            isOneToOne: false
+            referencedRelation: "recorrencias"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       subcategorias: {
         Row: {
           ativa: boolean
@@ -810,6 +852,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      atualizar_recorrencia_futuros: {
+        Args: {
+          p_apagar_ids?: string[]
+          p_lancamentos?: Json
+          p_recorrencia: Json
+        }
+        Returns: Json
+      }
       entrar_household: { Args: { _codigo: string }; Returns: string }
       excluir_parcelamento: {
         Args: { p_id: string; p_manter_ids?: string[] }
