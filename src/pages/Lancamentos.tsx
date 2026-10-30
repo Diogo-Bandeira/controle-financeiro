@@ -25,9 +25,11 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { DIAS_SEMANA_CURTOS, MESES, formatDataBR, formatDiaMes, formatDiaMesData, gravarLocalStorage, lerLocalStorage } from "@/lib/format";
-import { parseISODate, somarMeses, toISODate, ultimoDia } from "@/lib/fatura";
+import { compararMesAno, mesmoMes, parseISODate, somarMeses, toISODate, ultimoDia } from "@/lib/fatura";
 import { sumMoney } from "@/lib/money";
-import { competenciaDoLancamento } from "@/lib/recorrencias";
+import {
+  MESES_RECORRENCIA, competenciaDoLancamento, janelaRecorrencia, lancamentosRecorrentesDoMes, mesDaData, pendentesDaRecorrenciaApos,
+} from "@/lib/recorrencias";
 import { excluirAPartirDe } from "@/lib/parcelamento-ops";
 import { iniciais, normalizarTexto } from "@/lib/texto";
 import { cn } from "@/lib/utils";
@@ -151,6 +153,7 @@ export default function Lancamentos() {
     loading, mesSelecionado, anoSelecionado, lancamentos, lancamentosMes, cartoes, subcategoriasAtivas, membros, parcelamentos,
     entradas, reembolsos, totalSaidas, saldo, getCartao, getSubcategoria, resumoFatura, progressoParcelamento, statusLancamentoCartao,
     inserirLancamentos, updateLancamentos, deleteLancamentos, salvarParcelamento,
+    recorrencias, excecoes, lancamentoPago, salvarRecorrencia, registrarExcecoes, removerExcecoes,
   } = useFinanceData();
 
   const [filtros, setFiltros] = useState<Filtros>(() => ({ ...FILTROS_VAZIOS, ...lerLocalStorage<Partial<Filtros>>(CHAVE_FILTROS, {}) }));
@@ -163,6 +166,7 @@ export default function Lancamentos() {
   const [excluindo, setExcluindo] = useState<Lancamento[] | null>(null);
   const [confirmarCopia, setConfirmarCopia] = useState(false);
   const [copiando, setCopiando] = useState(false);
+  const [gerandoRecorrencias, setGerandoRecorrencias] = useState(false);
 
   useEffect(() => gravarLocalStorage(CHAVE_FILTROS, filtros), [filtros]);
   useEffect(() => gravarLocalStorage(CHAVE_ORDEM, ordem), [ordem]);
@@ -269,17 +273,46 @@ export default function Lancamentos() {
 
   // ─── Exclusão com Desfazer ──────────────────────────────────────────────
 
+  // Recorrentes excluídos viram exceção do mês (senão o gerador os recriaria).
   const excluir = async (alvos: Lancamento[]) => {
     setExcluindo(null);
+    const excecoesIds = await registrarExcecoes(alvos);
+    if (!excecoesIds) return;
     const removidos = await deleteLancamentos(alvos.map((l) => l.id));
-    if (removidos.length === 0) return;
+    if (removidos.length === 0) {
+      await removerExcecoes(excecoesIds);
+      return;
+    }
     setSelecionados(new Set());
     toast.success(`${removidos.length} lançamento(s) excluído(s)`, {
       action: {
         label: "Desfazer",
         onClick: async () => {
           const reinseridos = await inserirLancamentos(removidos.map(semIdentidade));
-          if (reinseridos) toast.success("Exclusão desfeita");
+          if (reinseridos && (await removerExcecoes(excecoesIds))) toast.success("Exclusão desfeita");
+        },
+      },
+    });
+  };
+
+  // Apaga este e os pendentes seguintes; a recorrência termina no mês anterior ao da data deste.
+  const excluirRecorrenteEProximos = async (l: Lancamento) => {
+    setExcluindo(null);
+    const rec = recorrencias.find((r) => r.id === l.recorrenciaId);
+    if (!rec) return;
+    const removidos = [l, ...pendentesDaRecorrenciaApos(rec.id, lancamentos, l.data, lancamentoPago)];
+    const mesLanc = mesDaData(l.data);
+    const anteriorAoLanc = somarMeses(mesLanc.mes, mesLanc.ano, -1);
+    const fimAtual = rec.fimAno != null && rec.fimMes != null ? { mes: rec.fimMes, ano: rec.fimAno } : null;
+    const fim = fimAtual && compararMesAno(fimAtual, anteriorAoLanc) < 0 ? fimAtual : anteriorAoLanc;
+    const ok = await salvarRecorrencia({ ...rec, fimMes: fim.mes, fimAno: fim.ano }, [], removidos.map((x) => x.id));
+    if (!ok) return;
+    toast.success(`${removidos.length} lançamento(s) excluído(s); recorrência encerrada em ${MESES[fim.mes]}/${fim.ano}`, {
+      action: {
+        label: "Desfazer",
+        onClick: async () => {
+          const reinseridos = await inserirLancamentos(removidos.map(semIdentidade));
+          if (reinseridos && (await salvarRecorrencia(rec))) toast.success("Exclusão desfeita");
         },
       },
     });
@@ -294,6 +327,24 @@ export default function Lancamentos() {
   };
 
   const parcelaUnica = excluindo?.length === 1 && excluindo[0].parcelamentoId ? excluindo[0] : null;
+  const recorrenteUnico =
+    excluindo?.length === 1 && !excluindo[0].parcelamentoId && recorrencias.some((r) => r.id === excluindo[0].recorrenciaId) ? excluindo[0] : null;
+  const temRecorrentes = !!excluindo?.some((l) => l.recorrenciaId);
+
+  // ─── Recorrências fora da janela automática ──────────────────────────────
+
+  const selecionado = { mes: mesSelecionado, ano: anoSelecionado };
+  const foraDaJanela = !janelaRecorrencia(new Date()).some((m) => mesmoMes(m, selecionado));
+  const recorrentesFaltando = foraDaJanela
+    ? lancamentosRecorrentesDoMes(recorrencias, lancamentos, selecionado, new Date(), cartoes, excecoes)
+    : [];
+
+  const gerarRecorrenciasDoMes = async () => {
+    setGerandoRecorrencias(true);
+    const inseridos = await inserirLancamentos(recorrentesFaltando);
+    setGerandoRecorrencias(false);
+    if (inseridos) toast.success(`${inseridos.length} lançamento(s) recorrente(s) gerado(s) em ${MESES[mesSelecionado]}`);
+  };
 
   // ─── Copiar mês anterior ────────────────────────────────────────────────
 
@@ -362,6 +413,19 @@ export default function Lancamentos() {
           </Button>
         </div>
       </div>
+
+      {recorrentesFaltando.length > 0 && (
+        <div className="text-xs rounded-md border border-warning/40 bg-warning/10 p-2 flex flex-wrap gap-2 items-center">
+          <Repeat className="h-4 w-4 text-warning shrink-0" />
+          <span className="flex-1 min-w-[200px]">
+            {recorrentesFaltando.length} recorrência(s) vigente(s) sem lançamento neste mês (fora dos próximos {MESES_RECORRENCIA} meses, não é gerado automaticamente).
+          </span>
+          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={gerarRecorrenciasDoMes} disabled={gerandoRecorrencias}>
+            {gerandoRecorrencias && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}
+            Gerar recorrências deste mês
+          </Button>
+        </div>
+      )}
 
       {/* Resumo */}
       <div className="grid grid-cols-3 gap-3">
@@ -644,14 +708,27 @@ export default function Lancamentos() {
                 : `Excluir ${excluindo?.length ?? 0} lançamento(s)?`}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {parcelaUnica
-                ? `"${parcelaUnica.descricao}" faz parte de um parcelamento. Excluir só esta parcela ou também as próximas ainda não pagas?`
-                : "Você poderá desfazer logo após a exclusão."}
+              {parcelaUnica && `"${parcelaUnica.descricao}" faz parte de um parcelamento. Excluir só esta parcela ou também as próximas ainda não pagas?`}
+              {recorrenteUnico &&
+                `"${recorrenteUnico.descricao}" é recorrente. "Só este mês" não volta a ser gerado neste mês; "Este e os próximos" também remove os pendentes seguintes e encerra a recorrência no mês anterior.`}
+              {!parcelaUnica && !recorrenteUnico &&
+                `${temRecorrentes ? "Os recorrentes não serão gerados de novo nesses meses. " : ""}Você poderá desfazer logo após a exclusão.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            {parcelaUnica ? (
+            {recorrenteUnico && (
+              <>
+                <Button variant="outline" onClick={() => excluir([recorrenteUnico])}>Só este mês</Button>
+                <AlertDialogAction
+                  onClick={() => excluirRecorrenteEProximos(recorrenteUnico)}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  Este e os próximos
+                </AlertDialogAction>
+              </>
+            )}
+            {!recorrenteUnico && (parcelaUnica ? (
               <>
                 <Button variant="outline" onClick={() => excluir([parcelaUnica])}>Só esta</Button>
                 <AlertDialogAction
@@ -668,7 +745,7 @@ export default function Lancamentos() {
               >
                 Excluir
               </AlertDialogAction>
-            )}
+            ))}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -705,6 +782,7 @@ interface LinhaLancamentoProps {
 function LinhaLancamento({ l, totalParcelas, selecionado, onSelecionar, onEditar, onRecorrente, onExcluir }: LinhaLancamentoProps) {
   const pendente = l.status === "pendente";
   const entrada = l.categoria === "entrada";
+  const previsto = l.origem === "recorrente" && l.data > toISODate(new Date());
   return (
     <div className={cn("flex items-start gap-2 px-3 py-2.5", pendente && "border-l-2 border-l-warning bg-warning/5", selecionado && "bg-primary/5")}>
       <Checkbox checked={selecionado} onCheckedChange={onSelecionar} className="mt-0.5" aria-label="Selecionar" />
@@ -736,6 +814,9 @@ function LinhaLancamento({ l, totalParcelas, selecionado, onSelecionar, onEditar
             <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground inline-flex items-center gap-0.5">
               <Repeat className="h-2.5 w-2.5" /> Recorrente
             </span>
+          )}
+          {previsto && (
+            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded border border-dashed border-primary/50 text-primary">Previsto</span>
           )}
           {l.origem === "importado" && <span className="text-[10px] text-muted-foreground">importado</span>}
           {entrada && l.reembolso && (

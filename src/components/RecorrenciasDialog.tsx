@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Pencil, Plus, Repeat, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -16,7 +16,8 @@ import { CartaoChip, OpcaoCor, SubcategoriaChip } from "@/components/Subcategori
 import { EstadoVazio } from "@/components/EstadoVazio";
 import { CATEGORIAS, formatCurrency, useFinanceData, type Categoria, type Lancamento, type Recorrencia } from "@/lib/finance-store";
 import { formatMesAno } from "@/lib/format";
-import { parseISODate, type MesAno } from "@/lib/fatura";
+import { parseISODate, toISODate, type MesAno } from "@/lib/fatura";
+import { MESES_RECORRENCIA, futurosDaRecorrencia, futurosForaDaVigencia, pendentesDaRecorrenciaApos, propagarEdicao } from "@/lib/recorrencias";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -31,6 +32,16 @@ type DadosRecorrencia = Omit<Recorrencia, "id">;
 
 const SEM = "__nenhum__";
 const catKeys = Object.keys(CATEGORIAS) as Categoria[];
+
+const normalizar = (f: DadosRecorrencia): DadosRecorrencia => ({
+  ...f,
+  descricao: f.descricao.trim(),
+  subcategoria: f.categoria === "entrada" ? null : f.subcategoria,
+  cartaoId: f.categoria === "cartao" ? f.cartaoId : null,
+  reembolso: f.categoria === "entrada" && f.reembolso,
+});
+
+const plural = (n: number, um: string, varios: string) => `${n} ${n === 1 ? um : varios}`;
 
 function novaRecorrencia(l: Lancamento | null | undefined, hoje: Date): DadosRecorrencia {
   const data = l ? parseISODate(l.data) : hoje;
@@ -52,11 +63,15 @@ function novaRecorrencia(l: Lancamento | null | undefined, hoje: Date): DadosRec
 }
 
 export function RecorrenciasDialog({ open, onOpenChange, aPartirDe }: RecorrenciasDialogProps) {
-  const { recorrencias, cartoes, subcategoriasAtivas, membros, addRecorrencia, updateRecorrencia, deleteRecorrencia } = useFinanceData();
+  const {
+    recorrencias, lancamentos, cartoes, subcategoriasAtivas, membros, lancamentoPago, addRecorrencia, salvarRecorrencia, excluirRecorrencia,
+  } = useFinanceData();
   const [editando, setEditando] = useState<Recorrencia | null>(null);
   const [form, setForm] = useState<DadosRecorrencia | null>(null);
   const [excluir, setExcluir] = useState<Recorrencia | null>(null);
   const [salvando, setSalvando] = useState(false);
+  // "Remover os lançamentos futuros já gerados?" (pausa/fim na edição e exclusão). Padrão: sim.
+  const [removerFuturos, setRemoverFuturos] = useState(true);
 
   useEffect(() => {
     if (!open) return;
@@ -64,11 +79,35 @@ export function RecorrenciasDialog({ open, onOpenChange, aPartirDe }: Recorrenci
     setForm(aPartirDe ? novaRecorrencia(aPartirDe, new Date()) : null);
   }, [open, aPartirDe]);
 
+  // Efeito da edição nos lançamentos futuros já gerados (data > hoje).
+  const impacto = useMemo(() => {
+    if (!editando || !form) return null;
+    const hoje = new Date();
+    const nova = { ...normalizar(form), id: editando.id };
+    return {
+      nova,
+      futuros: futurosDaRecorrencia(editando.id, lancamentos, hoje).length,
+      atualizar: propagarEdicao(editando, nova, lancamentos, hoje, cartoes),
+      apagar: futurosForaDaVigencia(nova, lancamentos, hoje, lancamentoPago),
+    };
+  }, [editando, form, lancamentos, cartoes, lancamentoPago]);
+
+  const pendentesExcluir = useMemo(
+    () => (excluir ? pendentesDaRecorrenciaApos(excluir.id, lancamentos, toISODate(new Date()), lancamentoPago) : []),
+    [excluir, lancamentos, lancamentoPago],
+  );
+
   const set = <K extends keyof DadosRecorrencia>(k: K, v: DadosRecorrencia[K]) => setForm((f) => (f ? { ...f, [k]: v } : f));
 
   const abrirEdicao = (r: Recorrencia) => {
     setEditando(r);
     setForm({ ...r });
+    setRemoverFuturos(true);
+  };
+
+  const pedirExclusao = (r: Recorrencia) => {
+    setExcluir(r);
+    setRemoverFuturos(true);
   };
 
   const salvar = async (e: React.FormEvent) => {
@@ -78,25 +117,37 @@ export function RecorrenciasDialog({ open, onOpenChange, aPartirDe }: Recorrenci
     if (form.valor <= 0) { toast.error("Informe o valor"); return; }
     if (form.categoria !== "entrada" && !form.subcategoria) { toast.error("Selecione a subcategoria"); return; }
     if (form.categoria === "cartao" && !form.cartaoId) { toast.error("Selecione o cartão"); return; }
-    const dados: DadosRecorrencia = {
-      ...form,
-      descricao: form.descricao.trim(),
-      subcategoria: form.categoria === "entrada" ? null : form.subcategoria,
-      cartaoId: form.categoria === "cartao" ? form.cartaoId : null,
-      reembolso: form.categoria === "entrada" && form.reembolso,
-    };
     setSalvando(true);
-    const ok = editando ? await updateRecorrencia({ ...dados, id: editando.id }) : !!(await addRecorrencia(dados));
+    const ok = impacto ? await salvarEdicao(impacto) : !!(await addRecorrencia(normalizar(form)));
     setSalvando(false);
     if (!ok) return;
-    toast.success(editando ? "Recorrência atualizada" : "Recorrência criada — os lançamentos serão gerados ao abrir cada mês");
+    if (!impacto) toast.success("Recorrência criada");
     setForm(null);
     setEditando(null);
   };
 
+  const salvarEdicao = async ({ nova, atualizar, apagar }: NonNullable<typeof impacto>) => {
+    const apagarIds = removerFuturos ? apagar.map((l) => l.id) : [];
+    const ok = await salvarRecorrencia(nova, atualizar.filter((l) => !apagarIds.includes(l.id)), apagarIds);
+    if (!ok) return false;
+    const detalhes = [
+      atualizar.length > 0 && plural(atualizar.length, "futuro atualizado", "futuros atualizados"),
+      apagarIds.length > 0 && plural(apagarIds.length, "futuro removido", "futuros removidos"),
+    ].filter(Boolean);
+    toast.success(detalhes.length ? `Recorrência atualizada (${detalhes.join(", ")})` : "Recorrência atualizada");
+    return true;
+  };
+
   const confirmarExclusao = async () => {
     if (!excluir) return;
-    if (await deleteRecorrencia(excluir.id)) toast.success("Recorrência excluída (lançamentos já gerados foram mantidos)");
+    const apagarIds = removerFuturos ? pendentesExcluir.map((l) => l.id) : [];
+    if (await excluirRecorrencia(excluir.id, apagarIds)) {
+      toast.success(
+        apagarIds.length
+          ? `Recorrência excluída e ${plural(apagarIds.length, "lançamento futuro removido", "lançamentos futuros removidos")}`
+          : "Recorrência excluída (lançamentos já gerados foram mantidos)",
+      );
+    }
     setExcluir(null);
   };
 
@@ -110,7 +161,7 @@ export function RecorrenciasDialog({ open, onOpenChange, aPartirDe }: Recorrenci
             <DialogTitle>{form ? (editando ? "Editar recorrência" : "Nova recorrência") : "Lançamentos recorrentes"}</DialogTitle>
             {!form && (
               <DialogDescription>
-                Gerados automaticamente ao abrir cada mês (até 1 mês à frente), sem duplicar.
+                Lançadas automaticamente no mês atual e nos {MESES_RECORRENCIA - 1} seguintes, sem duplicar.
               </DialogDescription>
             )}
           </DialogHeader>
@@ -224,6 +275,26 @@ export function RecorrenciasDialog({ open, onOpenChange, aPartirDe }: Recorrenci
                 <Switch id="rec-ativo" checked={form.ativo} onCheckedChange={(v) => set("ativo", v)} />
               </div>
 
+              <p className="text-xs text-muted-foreground">Será lançada automaticamente nos próximos {MESES_RECORRENCIA} meses.</p>
+
+              {impacto && impacto.futuros > 0 && (
+                <div className="rounded-md border bg-muted/30 p-3 space-y-2 text-xs">
+                  <p>
+                    {plural(impacto.futuros, "lançamento futuro já gerado", "lançamentos futuros já gerados")}:{" "}
+                    {impacto.atualizar.length > 0
+                      ? `${plural(impacto.atualizar.length, "será atualizado", "serão atualizados")} ao salvar.`
+                      : "nenhum muda com esta edição."}
+                  </p>
+                  <p className="text-muted-foreground">Os editados individualmente (valor ou descrição diferentes) não mudam.</p>
+                  {impacto.apagar.length > 0 && (
+                    <label className="flex items-center gap-2 cursor-pointer font-medium">
+                      <Checkbox checked={removerFuturos} onCheckedChange={(v) => setRemoverFuturos(v === true)} />
+                      Remover os lançamentos futuros já gerados? ({plural(impacto.apagar.length, "pendente fora da vigência", "pendentes fora da vigência")})
+                    </label>
+                  )}
+                </div>
+              )}
+
               <div className="flex gap-2">
                 <Button type="button" variant="outline" onClick={() => { setForm(null); setEditando(null); }}>
                   <ArrowLeft className="h-4 w-4 mr-1" /> Voltar
@@ -261,7 +332,7 @@ export function RecorrenciasDialog({ open, onOpenChange, aPartirDe }: Recorrenci
                       <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => abrirEdicao(r)} title="Editar">
                         <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
                       </Button>
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setExcluir(r)} title="Excluir">
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => pedirExclusao(r)} title="Excluir">
                         <Trash2 className="h-3.5 w-3.5 text-destructive" />
                       </Button>
                     </div>
@@ -278,9 +349,15 @@ export function RecorrenciasDialog({ open, onOpenChange, aPartirDe }: Recorrenci
           <AlertDialogHeader>
             <AlertDialogTitle>Excluir recorrência?</AlertDialogTitle>
             <AlertDialogDescription>
-              "{excluir?.descricao}" deixa de gerar lançamentos. Os lançamentos já gerados continuam.
+              "{excluir?.descricao}" deixa de gerar lançamentos. Os já gerados que ficarem continuam, sem vínculo com a recorrência.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {pendentesExcluir.length > 0 && (
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <Checkbox checked={removerFuturos} onCheckedChange={(v) => setRemoverFuturos(v === true)} />
+              Remover os lançamentos futuros já gerados? ({plural(pendentesExcluir.length, "pendente", "pendentes")})
+            </label>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction onClick={confirmarExclusao} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">

@@ -2,7 +2,7 @@
 
 import type { Database } from "@/integrations/supabase/types";
 import type {
-  Aporte, Cartao, FaturaPaga, Lancamento, Meta, NovoLancamento, Orcamento, Parcelamento, Prioridade, Recorrencia, Subcategoria,
+  Aporte, Cartao, FaturaPaga, Lancamento, Meta, NovoLancamento, Orcamento, Parcelamento, Prioridade, Recorrencia, RecorrenciaExcecao, Subcategoria,
 } from "./types";
 
 type Tabelas = Database["public"]["Tables"];
@@ -224,6 +224,13 @@ export const recorrenciaToRow = (r: Omit<Recorrencia, "id">): Insert<"recorrenci
   reembolso: r.reembolso,
   responsavel: r.responsavel,
   ativo: r.ativo,
+});
+
+export const mapRecorrenciaExcecao = (r: Row<"recorrencias_excecoes">): RecorrenciaExcecao => ({
+  id: r.id, recorrenciaId: r.recorrencia_id, ano: r.ano, mes: r.mes,
+});
+export const recorrenciaExcecaoToRow = (e: Omit<RecorrenciaExcecao, "id">): Insert<"recorrencias_excecoes"> => ({
+  recorrencia_id: e.recorrenciaId, ano: e.ano, mes: e.mes,
 });
 
 export const mapFaturaPaga = (r: Row<"faturas_pagas">): FaturaPaga => ({

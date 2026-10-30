@@ -135,6 +135,14 @@ export interface Recorrencia {
   ativo: boolean;
 }
 
+/** Mês (da data) em que a recorrência não é gerada: o lançamento foi excluído só naquele mês. */
+export interface RecorrenciaExcecao {
+  id: string;
+  recorrenciaId: string;
+  ano: number;
+  mes: number;
+}
+
 export interface FaturaPaga {
   id: string;
   cartaoId: string;

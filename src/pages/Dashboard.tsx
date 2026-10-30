@@ -1,11 +1,11 @@
 import { Link } from "react-router-dom";
 import { TrendingUp, TrendingDown, Wallet, CalendarClock, CreditCard, Target, PiggyBank, BarChart3 } from "lucide-react";
-import { Bar, BarChart, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Progress } from "@/components/ui/progress";
 import { ConsultorIA } from "@/components/ConsultorIA";
 import { OrcamentoCategorias } from "@/components/OrcamentoCategorias";
 import { EstadoVazio, PaginaCarregando } from "@/components/EstadoVazio";
-import { useFinanceData, formatCurrency, MESES } from "@/lib/finance-store";
+import { useFinanceData, formatCurrency, MESES, type Lancamento } from "@/lib/finance-store";
 import { formatDiaMes, formatDiaMesData, formatMesAno, MESES_CURTOS } from "@/lib/format";
 import { compararMesAno, diasEntre, indiceMes, parseISODate, somarMeses, type MesAno } from "@/lib/fatura";
 import { sumMoney } from "@/lib/money";
@@ -19,6 +19,44 @@ const tooltipStyle = {
 };
 
 const rotuloMes = ({ mes, ano }: MesAno) => `${MESES_CURTOS[mes]}/${String(ano).slice(2)}`;
+
+const SERIES_RECORRENTES = [
+  { chave: "recCartao", nome: "Recorrentes no cartão", cor: "hsl(var(--primary))" },
+  { chave: "recFixas", nome: "Contas fixas recorrentes", cor: "hsl(var(--warning))" },
+  { chave: "recOutras", nome: "Outras saídas recorrentes", cor: "hsl(var(--primary) / 0.45)" },
+];
+
+interface ItemTooltip {
+  dataKey?: string | number;
+  name?: string;
+  value?: number;
+  color?: string;
+  payload?: { saldo: number };
+}
+
+// Tooltip do gráfico de compromissos: séries do mês + saldo previsto (entradas recorrentes − compromissos).
+function TooltipCompromissos({ active, label, payload }: { active?: boolean; label?: string; payload?: ItemTooltip[] }) {
+  if (!active || !payload?.length) return null;
+  const saldo = payload[0].payload?.saldo ?? 0;
+  return (
+    <div style={tooltipStyle.contentStyle} className="px-3 py-2 space-y-0.5 text-popover-foreground">
+      <p style={tooltipStyle.labelStyle}>{label}</p>
+      {payload.filter((p) => (p.value ?? 0) > 0).map((p) => (
+        <p key={String(p.dataKey)} className="flex items-center justify-between gap-4">
+          <span className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: p.color }} />
+            {p.name}
+          </span>
+          <span>{formatCurrency(p.value ?? 0)}</span>
+        </p>
+      ))}
+      <p className="flex justify-between gap-4 border-t pt-1 mt-1 font-semibold">
+        <span>Saldo previsto</span>
+        <span className={saldo >= 0 ? "text-success" : "text-destructive"}>{formatCurrency(saldo)}</span>
+      </p>
+    </div>
+  );
+}
 
 export default function Dashboard() {
   const {
@@ -57,7 +95,7 @@ export default function Dashboard() {
     return { texto: dias <= 0 ? "fecha hoje" : `fecha em ${dias} dia${dias === 1 ? "" : "s"}`, cls: dias <= 3 ? "text-warning" : "text-muted-foreground" };
   };
 
-  // ─── Compromissos futuros de parcelas (6 meses) ─────────────────────────
+  // ─── Compromissos dos próximos 6 meses (parcelas + recorrências) ─────────
   const meses6 = Array.from({ length: 6 }, (_, i) => somarMeses(sel.mes, sel.ano, i));
   const progressos = parcelamentos.map((p) => ({ p, prog: progressoParcelamento(p) }));
   const legados = progressos.filter(({ prog }) => !prog.vinculado && prog.restantes > 0);
@@ -65,18 +103,25 @@ export default function Dashboard() {
   const series = [
     ...cartoes.map((c) => ({ chave: c.id, nome: c.nome, cor: c.cor ?? "#64748B" })),
     { chave: "legado", nome: "Legado (estimado)", cor: COR_EIXO },
+    ...SERIES_RECORRENTES,
   ];
-  const dadosParcelas = meses6.map((m) => {
-    const doMes = lancamentos.filter((l) => l.parcelamentoId && l.mes === m.mes && l.ano === m.ano);
-    const porCartao = Object.fromEntries(cartoes.map((c) => [c.id, sumMoney(doMes.filter((l) => l.cartaoId === c.id).map((l) => l.valor))]));
+  const dadosCompromissos = meses6.map((m) => {
+    const doMes = lancamentosDoMes(m.ano, m.mes);
+    const soma = (f: (l: Lancamento) => boolean) => sumMoney(doMes.filter(f).map((l) => l.valor));
+    const recorrente = (categoria: Lancamento["categoria"]) => (l: Lancamento) => l.origem === "recorrente" && l.categoria === categoria;
+    const porCartao = Object.fromEntries(cartoes.map((c) => [c.id, soma((l) => !!l.parcelamentoId && l.cartaoId === c.id)]));
     const legado = sumMoney(
       legados
         .filter(({ prog }) => compararMesAno(m, mesAtual) >= 0 && prog.termino && compararMesAno(m, prog.termino) <= 0)
         .map(({ p }) => p.valorParcela),
     );
-    return { rotulo: rotuloMes(m), ...porCartao, legado };
+    const saidasRec = { recCartao: soma(recorrente("cartao")), recFixas: soma(recorrente("conta_fixa")), recOutras: soma(recorrente("variavel")) };
+    const entradasRec = soma(recorrente("entrada"));
+    const compromissos = sumMoney([...Object.values(porCartao), legado, ...Object.values(saidasRec)]);
+    return { rotulo: rotuloMes(m), ...porCartao, legado, ...saidasRec, entradasRec, saldo: sumMoney([entradasRec, -compromissos]) };
   });
-  const seriesUsadas = series.filter((s) => dadosParcelas.some((d) => (d[s.chave] ?? 0) > 0));
+  const seriesUsadas = series.filter((s) => dadosCompromissos.some((d) => (d[s.chave] ?? 0) > 0));
+  const temEntradasRec = dadosCompromissos.some((d) => d.entradasRec > 0);
   const terminandoEmBreve = progressos
     .filter(({ prog }) => !prog.concluido && prog.termino && indiceMes(prog.termino) - indiceMes(sel) >= 0 && indiceMes(prog.termino) - indiceMes(sel) <= 2)
     .sort((a, b) => compararMesAno(a.prog.termino, b.prog.termino));
@@ -203,29 +248,32 @@ export default function Dashboard() {
         <OrcamentoCategorias />
       </div>
 
-      {/* Compromissos futuros de parcelas */}
+      {/* Compromissos dos próximos 6 meses */}
       <div className="finance-card">
-        <h3 className="section-title mb-4">Compromissos futuros de parcelas</h3>
-        {seriesUsadas.length === 0 ? (
+        <h3 className="section-title mb-4">Compromissos dos próximos 6 meses</h3>
+        {seriesUsadas.length === 0 && !temEntradasRec ? (
           <EstadoVazio
             icone={CreditCard}
-            titulo="Sem parcelas nos próximos meses"
+            titulo="Sem parcelas ou recorrências nos próximos meses"
             acao={<Link to="/parcelamentos" className="text-sm text-primary hover:underline">Ver parcelamentos</Link>}
           />
         ) : (
           <>
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={dadosParcelas} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                <ComposedChart data={dadosCompromissos} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
                   <XAxis dataKey="rotulo" tick={{ fill: COR_EIXO, fontSize: 12 }} axisLine={false} tickLine={false} />
                   <YAxis tickFormatter={compacto} tick={{ fill: COR_EIXO, fontSize: 12 }} axisLine={false} tickLine={false} width={48} />
-                  <Tooltip formatter={tooltipBRL} cursor={{ fill: "hsl(var(--muted))", opacity: 0.4 }} {...tooltipStyle} />
+                  <Tooltip content={<TooltipCompromissos />} cursor={{ fill: "hsl(var(--muted))", opacity: 0.4 }} />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
                   {seriesUsadas.map((s) => (
-                    <Bar key={s.chave} dataKey={s.chave} name={s.nome} stackId="parcelas" fill={s.cor} maxBarSize={48} />
+                    <Bar key={s.chave} dataKey={s.chave} name={s.nome} stackId="compromissos" fill={s.cor} maxBarSize={48} />
                   ))}
-                </BarChart>
+                  {temEntradasRec && (
+                    <Line dataKey="entradasRec" name="Entradas recorrentes" type="monotone" stroke="hsl(var(--success))" strokeWidth={2} dot={{ r: 3 }} />
+                  )}
+                </ComposedChart>
               </ResponsiveContainer>
             </div>
             {terminandoEmBreve.length > 0 && (

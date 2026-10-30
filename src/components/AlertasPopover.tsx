@@ -42,7 +42,7 @@ export function AlertasPopover() {
     });
 
     const contas = lancamentos
-      .filter((l) => l.status === "pendente" && l.categoria !== "cartao")
+      .filter((l) => l.status === "pendente" && l.categoria !== "cartao" && l.categoria !== "entrada")
       .flatMap((l) => {
         const dias = diasEntre(hoje, parseISODate(l.data));
         if (dias > 7) return [];

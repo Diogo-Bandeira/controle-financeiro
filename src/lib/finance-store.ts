@@ -5,20 +5,20 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
-import { compararMesAno, limiteEfetivo as calcLimiteEfetivo, somarMeses, toISODate, type MesAno } from "./fatura";
+import { limiteEfetivo as calcLimiteEfetivo, somarMeses, toISODate, type MesAno } from "./fatura";
 import { sumMoney } from "./money";
-import { lancamentosRecorrentesDoMes } from "./recorrencias";
+import { MESES_RECORRENCIA, lancamentosRecorrentesDaJanela, mesDaData } from "./recorrencias";
 import { definirValoresOcultos, gravarLocalStorage, lerLocalStorage } from "./format";
 import {
   aporteToRow, cartaoToRow, faturaPagaToRow, lancamentoToRow, mapAporte, mapCartao, mapFaturaPaga, mapLancamento, mapMeta, mapOrcamento,
-  mapParcelamento, mapPrioridade, mapRecorrencia, mapSubcategoria, metaToRow, orcamentoToRow, parcelamentoToRow, prioridadeToRow,
-  recorrenciaToRow, subcategoriaToRow,
+  mapParcelamento, mapPrioridade, mapRecorrencia, mapRecorrenciaExcecao, mapSubcategoria, metaToRow, orcamentoToRow, parcelamentoToRow,
+  prioridadeToRow, recorrenciaExcecaoToRow, recorrenciaToRow, subcategoriaToRow,
 } from "./store/mappers";
 import {
   faturasDoCartao as calcFaturasDoCartao, progressoParcelamento as calcProgresso, resumoFatura as calcResumoFatura,
   statusLancamentoCartao as calcStatusLancamento,
 } from "./store/derivados";
-import type { Household, Lancamento, Membro, NovoLancamento, Parcelamento, Subcategoria } from "./store/types";
+import type { Household, Lancamento, Membro, NovoLancamento, Parcelamento, Recorrencia, Subcategoria } from "./store/types";
 
 export * from "./store/types";
 export type { ResumoFatura, ProgressoParcelamento } from "./store/derivados";
@@ -103,10 +103,12 @@ function useFinanceDataInternal() {
   const subE = useEntidade(householdId, { tabela: "subcategorias", rotulo: "subcategoria", map: mapSubcategoria, toRow: subcategoriaToRow, ordem: "ordem" });
   const orcE = useEntidade(householdId, { tabela: "orcamentos", rotulo: "limite do mês", map: mapOrcamento, toRow: orcamentoToRow });
   const recE = useEntidade(householdId, { tabela: "recorrencias", rotulo: "recorrência", map: mapRecorrencia, toRow: recorrenciaToRow, ordem: "created_at" });
+  const excE = useEntidade(householdId, { tabela: "recorrencias_excecoes", rotulo: "exceção de recorrência", map: mapRecorrenciaExcecao, toRow: recorrenciaExcecaoToRow });
   const fatE = useEntidade(householdId, { tabela: "faturas_pagas", rotulo: "fatura paga", map: mapFaturaPaga, toRow: faturaPagaToRow });
   const { add: addLancRaw, carregar: carregarLanc } = lancE;
   const { carregar: carregarParc } = parcE;
-  const { carregar: carregarRec } = recE;
+  const { add: addRecRaw, remove: removeRec, carregar: carregarRec } = recE;
+  const { carregar: carregarExc } = excE;
   const { carregar: carregarOrc } = orcE;
   const { setItens: setSubcategorias, carregar: carregarSub } = subE;
   const { itens: prioridades, setItens: setPrioridades, carregar: carregarPrio } = prioE;
@@ -148,9 +150,10 @@ function useFinanceDataInternal() {
     cartoes: cartoesE.carregar,
     subcategorias: carregarSub,
     orcamentos: carregarOrc,
-    recorrencias: recE.carregar,
+    recorrencias: carregarRec,
+    recorrencias_excecoes: carregarExc,
     faturas_pagas: fatE.carregar,
-  }), [metasE.carregar, aportesE.carregar, carregarLanc, carregarParc, carregarPrio, cartoesE.carregar, carregarSub, carregarOrc, recE.carregar, fatE.carregar]);
+  }), [metasE.carregar, aportesE.carregar, carregarLanc, carregarParc, carregarPrio, cartoesE.carregar, carregarSub, carregarOrc, carregarRec, carregarExc, fatE.carregar]);
 
   const carregadoresRef = useRef(carregadores);
   carregadoresRef.current = carregadores;
@@ -330,25 +333,85 @@ function useFinanceDataInternal() {
     return true;
   }, []);
 
-  // ─── Recorrências: gera lançamentos do mês aberto (passado, atual ou +1) ──
+  // ─── Recorrências: mantém lançada a janela móvel (mês atual + 5) ─────────
 
   const recorrencias = recE.itens;
   const cartoes = cartoesE.itens;
-  const geradosRef = useRef(new Set<string>());
+  const excecoes = excE.itens;
+  // Chave da última geração: janela + recorrências + dias dos cartões. Mudou → gera o que falta (uma vez por chave).
+  const geracaoRef = useRef<string | null>(null);
+  // Ação do usuário (criar/editar recorrência) pede toast na próxima geração.
+  const avisarGeracaoRef = useRef(false);
 
   useEffect(() => {
-    if (loading || recorrencias.length === 0) return;
-    const alvo = { mes: mesSelecionado, ano: anoSelecionado };
+    if (loading || !householdId) return;
     const agora = new Date();
-    if (compararMesAno(alvo, somarMeses(agora.getMonth(), agora.getFullYear(), 1)) > 0) return;
-    const novos = lancamentosRecorrentesDoMes(recorrencias, lancamentos, alvo, agora, cartoes);
-    const chave = `${anoSelecionado}-${mesSelecionado}-${novos.map((n) => n.recorrenciaId).join(",")}`;
-    if (novos.length === 0 || geradosRef.current.has(chave)) return;
-    geradosRef.current.add(chave);
+    const chave = JSON.stringify([
+      householdId, agora.getMonth(), agora.getFullYear(), recorrencias, cartoes.map((c) => [c.id, c.diaFechamento, c.diaVencimento]),
+    ]);
+    if (geracaoRef.current === chave) return;
+    geracaoRef.current = chave;
+    const avisar = avisarGeracaoRef.current;
+    avisarGeracaoRef.current = false;
+    const novos = lancamentosRecorrentesDaJanela(recorrencias, lancamentos, excecoes, agora, cartoes);
+    if (novos.length === 0) return;
     inserirLancamentos(novos).then((inseridos) => {
-      if (inseridos?.length) toast.success(`${inseridos.length} lançamento(s) recorrente(s) gerado(s)`);
+      if (avisar && inseridos?.length) toast.success(`Recorrência lançada nos próximos ${MESES_RECORRENCIA} meses`);
     });
-  }, [loading, recorrencias, lancamentos, cartoes, mesSelecionado, anoSelecionado, inserirLancamentos]);
+  }, [loading, householdId, recorrencias, cartoes, lancamentos, excecoes, inserirLancamentos]);
+
+  const addRecorrencia = useCallback((r: Omit<Recorrencia, "id">) => {
+    avisarGeracaoRef.current = true;
+    return addRecRaw(r);
+  }, [addRecRaw]);
+
+  /** Salva a recorrência e, na mesma transação, atualiza `futuros` e apaga `apagarIds` (lançamentos dela). */
+  const salvarRecorrencia = useCallback(async (r: Recorrencia, futuros: Lancamento[] = [], apagarIds: string[] = []): Promise<boolean> => {
+    const { id, ...resto } = r;
+    const { error } = await supabase.rpc("atualizar_recorrencia_futuros", {
+      p_recorrencia: { id, ...recorrenciaToRow(resto) },
+      p_lancamentos: futuros.map(lancamentoToRow),
+      p_apagar_ids: apagarIds,
+    });
+    if (error) { toast.error("Erro ao salvar recorrência"); return false; }
+    avisarGeracaoRef.current = JSON.stringify(r) !== JSON.stringify(recorrencias.find((x) => x.id === id));
+    await Promise.all([carregarRec(), carregarLanc()]);
+    return true;
+  }, [recorrencias, carregarRec, carregarLanc]);
+
+  /** Apaga `apagarIds` (futuros pendentes) e a recorrência; os demais lançamentos ficam com recorrencia_id NULL. */
+  const excluirRecorrencia = useCallback(async (id: string, apagarIds: string[] = []): Promise<boolean> => {
+    if (apagarIds.length > 0) {
+      const { error } = await supabase.from("lancamentos").delete().in("id", apagarIds);
+      if (error) { toast.error("Erro ao excluir lançamentos futuros"); return false; }
+    }
+    const ok = await removeRec(id);
+    await carregarLanc();
+    return ok;
+  }, [removeRec, carregarLanc]);
+
+  /** Grava exceções (mês da data) para os lançamentos recorrentes; devolve os ids criados (para "Desfazer"). */
+  const registrarExcecoes = useCallback(async (lancs: Lancamento[]): Promise<string[] | null> => {
+    const linhas = lancs
+      .filter((l) => l.recorrenciaId)
+      .map((l) => ({ household_id: householdId, ...recorrenciaExcecaoToRow({ recorrenciaId: l.recorrenciaId, ...mesDaData(l.data) }) }));
+    if (!householdId || linhas.length === 0) return [];
+    const { data, error } = await supabase
+      .from("recorrencias_excecoes")
+      .upsert(linhas, { onConflict: "recorrencia_id,ano,mes", ignoreDuplicates: true })
+      .select("id");
+    if (error) { toast.error("Erro ao registrar exceção da recorrência"); return null; }
+    await carregarExc();
+    return (data ?? []).map((e) => e.id);
+  }, [householdId, carregarExc]);
+
+  const removerExcecoes = useCallback(async (ids: string[]): Promise<boolean> => {
+    if (ids.length === 0) return true;
+    const { error } = await supabase.from("recorrencias_excecoes").delete().in("id", ids);
+    if (error) { toast.error("Erro ao remover exceção da recorrência"); return false; }
+    await carregarExc();
+    return true;
+  }, [carregarExc]);
 
   // ─── Derivados ───────────────────────────────────────────────────────────
 
@@ -378,6 +441,11 @@ function useFinanceDataInternal() {
     (l: Lancamento) => calcStatusLancamento(l, cartoes, faturasPagas, new Date()),
     [cartoes, faturasPagas],
   );
+  /** Pago de fato: cartão pelo status da fatura; demais pelo campo status. */
+  const lancamentoPago = useCallback((l: Lancamento) => {
+    const fatura = calcStatusLancamento(l, cartoes, faturasPagas, new Date());
+    return fatura ? fatura === "paga" : l.status === "pago";
+  }, [cartoes, faturasPagas]);
   const progressoParcelamento = useCallback(
     (p: Parcelamento) => calcProgresso(p, lancamentos, cartoes, faturasPagas, new Date()),
     [lancamentos, cartoes, faturasPagas],
@@ -405,12 +473,12 @@ function useFinanceDataInternal() {
     mesSelecionado, setMesSelecionado, anoSelecionado, setAnoSelecionado, irParaMes,
     // entidades
     metas: metasE.itens, aportes: aportesE.itens, lancamentos, parcelamentos: parcE.itens, prioridades,
-    cartoes, subcategorias, orcamentos, recorrencias, faturasPagas, membros, household,
+    cartoes, subcategorias, orcamentos, recorrencias, excecoes, faturasPagas, membros, household,
     // totais do mês selecionado
     lancamentosMes, entradas, reembolsos, rendaPlanejamento, contasFixas, totalCartao, variaveis, totalSaidas, saldo,
     // helpers derivados
     subcategoriasAtivas, getSubcategoria, getCartao, limiteEfetivo, lancamentosDoMes, faturasDoCartao, resumoFatura,
-    statusLancamentoCartao, progressoParcelamento,
+    statusLancamentoCartao, lancamentoPago, progressoParcelamento,
     // CRUD
     addMeta: metasE.add, updateMeta: metasE.update, deleteMeta: metasE.remove,
     addAporte: aportesE.add, deleteAporte: aportesE.remove,
@@ -421,7 +489,7 @@ function useFinanceDataInternal() {
     addCartao: cartoesE.add, updateCartao: cartoesE.update, deleteCartao,
     addSubcategoria: subE.add, updateSubcategoria: subE.update, reordenarSubcategorias,
     definirLimiteMeses,
-    addRecorrencia: recE.add, updateRecorrencia: recE.update, deleteRecorrencia: recE.remove,
+    addRecorrencia, salvarRecorrencia, excluirRecorrencia, registrarExcecoes, removerExcecoes,
     marcarFaturaPaga, desmarcarFaturaPaga,
     entrarHousehold, recarregarMembros: carregarMembros,
   };
