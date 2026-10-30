@@ -17,7 +17,7 @@
 ## Tech Debt
 
 **Generated types hand-edited:**
-- `src/integrations/supabase/types.ts` foi atualizado à mão para a migration `20261029120000`. Regenerar com `supabase gen types` após aplicar.
+- `src/integrations/supabase/types.ts` foi atualizado à mão para a migration `20261030120000` (`recorrencias_excecoes`, `atualizar_recorrencia_futuros`). Regenerar com `supabase gen types` após aplicar.
 
 **`lancamentos.cartao_nome` obsoleta:**
 - Mantida no banco após backfill para `cartao_id`; o app não usa mais. Remover numa migration futura.
@@ -38,7 +38,12 @@ Nenhum conhecido no momento. Resolvidos em 2026-10-29: chat sem metas, efeito do
 - Um contexto com todas as entidades; qualquer mudança re-renderiza todas as páginas consumidoras. Realtime recarrega a tabela inteira afetada.
 - Safe modification: manter o shape do retorno; mappers em `store/mappers.ts`.
 
-**Status de parcela derivado do relógio do cliente:** depende de `new Date()` e do fuso do navegador.
+**Status de parcela derivado do relógio do cliente:** depende de `new Date()` e do fuso do navegador. Idem para a janela de recorrências e o selo "Previsto".
+
+**Recorrências (janela de 6 meses):**
+- Mudar fechamento/vencimento de um cartão gera o que falta, mas não recalcula a competência dos lançamentos recorrentes já gerados nesse cartão (só a edição da recorrência recalcula).
+- "Gerar recorrências deste mês" usa o mês selecionado como mês de **data**; recorrências no cartão podem cair na fatura do mês seguinte.
+- Geração concorrente (dois membros, Realtime) depende do `ON CONFLICT DO NOTHING` + unique por mês da data; o estado local pode estar defasado por até um recarregamento.
 
 **Parcelamentos legados:** sem cartão/datas até serem vinculados; "termina em" é estimado a partir de hoje.
 
