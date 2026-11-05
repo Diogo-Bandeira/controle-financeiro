@@ -11,6 +11,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { PaginaCarregando } from "@/components/EstadoVazio";
+import { TelegramConexao } from "@/components/TelegramConexao";
 import { iniciais } from "@/lib/texto";
 import { Copy, Eye, Laptop, Moon, Sun, UserPlus, Users } from "lucide-react";
 import { toast } from "sonner";
@@ -105,6 +106,8 @@ export default function Configuracoes() {
           </ul>
         )}
       </section>
+
+      <TelegramConexao />
 
       <section className="finance-card space-y-4">
         <h3 className="section-title text-lg">Preferências</h3>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  ArrowDownUp, ChevronDown, CopyPlus, Download, FileUp, Filter, Loader2, Pencil, Plus, Receipt, Repeat, Search, Trash2, X,
+  ArrowDownUp, ChevronDown, CopyPlus, Download, FileUp, Filter, Loader2, Pencil, Plus, Receipt, Repeat, Search, Send, Trash2, X,
 } from "lucide-react";
 import {
   useFinanceData, formatCurrency, CATEGORIAS, type Categoria, type Lancamento, type NovoLancamento, type OrigemLancamento,
@@ -78,6 +78,7 @@ const ORIGENS: { valor: OrigemLancamento; label: string }[] = [
   { valor: "parcela", label: "Parcela" },
   { valor: "recorrente", label: "Recorrente" },
   { valor: "importado", label: "Importado" },
+  { valor: "telegram", label: "Telegram" },
 ];
 const CAMPOS_ORDEM: { valor: CampoOrdem; label: string }[] = [
   { valor: "data", label: "Data" },
@@ -819,6 +820,11 @@ function LinhaLancamento({ l, totalParcelas, selecionado, onSelecionar, onEditar
             <span className="text-[10px] font-medium px-1.5 py-0.5 rounded border border-dashed border-primary/50 text-primary">Previsto</span>
           )}
           {l.origem === "importado" && <span className="text-[10px] text-muted-foreground">importado</span>}
+          {l.origem === "telegram" && (
+            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground inline-flex items-center gap-0.5">
+              <Send className="h-2.5 w-2.5" /> Telegram
+            </span>
+          )}
           {entrada && l.reembolso && (
             <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-success/10 text-success">Reembolso</span>
           )}
