@@ -1,6 +1,6 @@
 # Architecture
 
-**Pattern:** Client-heavy SPA over BaaS. Browser talks directly to Supabase (PostgREST + RPCs, RLS enforces tenancy). Server logic: SQL functions (batch RPCs) + 2 Supabase Edge Functions (LLM proxies).
+**Pattern:** Client-heavy SPA over BaaS. Browser talks directly to Supabase (PostgREST + RPCs, RLS enforces tenancy). Server logic: SQL functions (batch RPCs) + 2 Supabase Edge Functions (LLM proxies) + Edge Function `telegram-bot` (webhook, service role).
 
 ## High-Level Structure
 
@@ -21,12 +21,15 @@ flowchart LR
   Cons -- invoke JWT --> EF2[Edge fn consultor-financeiro]
   EF1 --> Gemini[Google Gemini]
   EF2 --> Gemini
+  TG[Telegram] -- webhook + secret --> EF3[Edge fn telegram-bot]
+  EF3 -- service role + RPCs bot_* --> SB
+  EF3 -. só se o parser local falhar .-> Gemini
 ```
 
 ## Domain model
 
 - **mes 0–11** everywhere (Janeiro = 0). `new Date(ano, mes, dia)`.
-- `lancamentos`: `data` (DATE) + competência `mes/ano`. Entradas/contas fixas/variáveis: mês da data. Cartão: mês da **fatura** (vencimento). `origem` = manual | parcela | recorrente | importado. `status` pago | pendente. `reembolso` (entradas).
+- `lancamentos`: `data` (DATE) + competência `mes/ano`. Entradas/contas fixas/variáveis: mês da data. Cartão: mês da **fatura** (vencimento). `origem` = manual | parcela | recorrente | importado | telegram (parcelas criadas pelo bot continuam `parcela`; o parcelamento recebe `observacao = 'via Telegram'`). `status` pago | pendente. `reembolso` (entradas).
 - `cartoes`: `dia_fechamento` / `dia_vencimento` (nullable só nos migrados). Fatura: compra < dia de fechamento → fecha no mês; senão no seguinte. Vencimento no mesmo mês do fechamento se `dia_vencimento > dia_fechamento`, senão no seguinte. Dias limitados ao último dia do mês.
 - `parcelamentos` vinculados (`cartao_id` + `primeira_fatura_*`) geram 1 lançamento por parcela (`parcelamento_id`, `parcela_num`). Status da parcela é **derivado**: paga se fatura em `faturas_pagas` ou hoje ≥ vencimento. `parcelas_pagas` nos vinculados = parcelas anteriores não geradas. Legados (sem cartão) seguem com `parcelas_pagas` manual.
 - `subcategorias` (por household, seed `seed_subcategorias`) + `orcamentos` (override mensal). Limite efetivo = override do mês ?? `limite_padrao`. `conta_no_orcamento=false` (ex.: Compras de Terceiros) fica fora do total.
@@ -48,7 +51,9 @@ flowchart LR
 
 ### Domínio puro (testado)
 
-`src/lib/fatura.ts` (fatura, parcelas, status, limite), `money.ts`, `recorrencias.ts`, `parcelamento-ops.ts` (regerar/quitar/aplicar a partir de/duplicados), `importacao.ts` (CSV/OFX), `texto.ts` (normalização/similaridade), `metas.ts`. Sem React/Supabase.
+`src/lib/fatura.ts` (fatura, parcelas, status, limite), `money.ts`, `recorrencias.ts`, `parcelamento-ops.ts` (regerar/quitar/aplicar a partir de/duplicados), `importacao.ts` (CSV/OFX), `texto.ts` (normalização/similaridade), `sugestao.ts` (subcategoria/cartão/categoria pelo histórico), `metas.ts`. Sem React/Supabase.
+
+**Compartilhado com o Deno:** `fatura.ts`, `money.ts`, `texto.ts` e `sugestao.ts` vivem em `supabase/functions/_shared/dominio/` (imports relativos com `.ts`); `src/lib/<nome>.ts` só reexporta (`export * from "../../supabase/functions/_shared/dominio/<nome>.ts"`). O front importa igual; tsc/Vite/Vitest resolvem pelo `allowImportingTsExtensions`.
 
 ### Formulários reutilizáveis
 
@@ -63,7 +68,17 @@ Tema (`next-themes`, classe `.dark`), ocultar valores (`formatCurrency` → `R$ 
 **Location:** `supabase/functions/*/index.ts`, `_shared/http.ts`
 **Implementation:** `Deno.serve`, `verify_jwt = true`, CORS restrito (GH Pages + localhost:8080), limite 200 KB (413), validação mínima do corpo (400), erros JSON com 5xx para falhas do Gemini, `npm:@google/genai@2.19.0` fixado. Contexto montado no cliente por `useContextoIA` (cartões/faturas, parcelas futuras, limites, reembolsos, prioridades, metas+aportes); chat envia só as últimas 20 mensagens.
 
+### Bot do Telegram
+
+**Location:** `supabase/functions/telegram-bot/` (setup: `docs/telegram-bot.md`)
+**Implementation:** `index.ts` só monta as dependências (supabase-js com service role, Telegram, Gemini REST); `handler.ts` recebe tudo injetado (testado no Vitest em `src/test/telegram-bot/`). Módulos puros: `parser.ts` (formatos comuns sem IA + consultas por palavra-chave), `validacao.ts` (saída da IA), `montagem.ts` (regras de domínio → linhas das RPCs), `mensagens.ts`/`consultas.ts` (HTML do Telegram), `datas.ts` (fuso America/Sao_Paulo; a função roda em UTC), `gemini.ts` (1 chamada com `responseSchema`), `repo.ts` (acesso a dados, sempre com `household_id`).
+**Segurança:** `verify_jwt = false`; header `X-Telegram-Bot-Api-Secret-Token` comparado em tempo constante (401). Só chat privado e vinculado (`telegram_vinculos`); não vinculado recebe só a instrução (sem IA). Escritas pelas RPCs `bot_*` (SECURITY DEFINER, `p_household_id` explícito, EXECUTE só para `service_role`), que reaproveitam os núcleos `inserir_lancamentos_no_household` / `salvar_parcelamento_no_household` (as RPCs do app viraram wrappers deles com `get_user_household_id(auth.uid())`).
+
 ## Data Flow
+
+### Mensagem no Telegram
+
+Webhook → secret → 200 imediato (`EdgeRuntime.waitUntil`) → vínculo do chat → `telegram_mensagens` (unique `update_id` = dedup) → limite 40 msgs/h → comando | callback | `interpretarLocal` → se não resolver (ou áudio/foto) 1 chamada ao Gemini (bloqueada se `ia_uso_diario.limite_diario_atingido` no dia) → `validarSaidaIA` → `completarPeloHistorico` (mesma `sugerir` do `LancamentoForm`) → faltou tipo/cartão/subcategoria? pergunta com botões (`telegram_pendencias`, 30 min) → `montarGravacao` (`calcularFatura`/`gerarParcelas`) → `bot_inserir_lancamentos` / `bot_salvar_parcelamento` → ids em `telegram_mensagens.lancamento_ids` (Desfazer 24 h via `bot_excluir_lancamentos`) → confirmação com uso da subcategoria no mês de competência. O app atualiza pelo Realtime existente.
 
 ### Parcelamento novo
 
