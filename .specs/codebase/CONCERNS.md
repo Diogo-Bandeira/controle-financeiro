@@ -11,6 +11,15 @@
 **No rate limit on Gemini proxies:**
 - `verify_jwt = true`, CORS restrito e limite de 200 KB já aplicados; qualquer usuário autenticado ainda pode chamar sem limite de frequência.
 
+**Bot do Telegram com service role:**
+- A Edge Function `telegram-bot` ignora RLS. Proteção: secret do webhook (tempo constante), só chats privados vinculados, `household_id` vindo sempre do vínculo do chat (nunca da mensagem) e filtrado em toda query de `repo.ts`; RPCs `bot_*` são SECURITY DEFINER com EXECUTE só para `service_role`. Vazamento do `TELEGRAM_WEBHOOK_SECRET` permite forjar updates de um `chat_id` vinculado (conhecendo o id) → rotacione com `setWebhook`.
+- Código de vínculo: 6 chars (32⁶ ≈ 10⁹), 10 min, uso único, gerado com `gen_random_uuid()`. Sem limite de tentativas por chat não vinculado (o Telegram limita a taxa).
+
+**Gemini gratuito (bot):**
+- Cota diária do free tier é por projeto/chave, não por household: um 429 diário bloqueia IA, áudio e foto até a meia-noite de São Paulo (o reset do Google é à meia-noite do Pacífico). 429 "por minuto" não bloqueia o dia. Texto nos formatos comuns segue funcionando pelo parser local.
+- Privacidade: no free tier o Google pode usar o conteúdo enviado (texto, áudio, fotos de comprovantes) para melhorar os produtos e revisores humanos podem lê-lo. O aviso está em Configurações. Plano pago resolve (ver `docs/telegram-bot.md`).
+- Modelo `gemini-3.5-flash-lite` não verificado contra a doc do Gemini (configurável por `GEMINI_MODEL_BOT`).
+
 **`entrar_household` sem consentimento do dono:**
 - Quem tiver o código de convite entra no household. Fix: código rotacionável / expiração.
 
@@ -55,5 +64,5 @@ Nenhum conhecido no momento. Resolvidos em 2026-10-29: chat sem metas, efeito do
 
 - **RLS policies / RPCs** — validados manualmente num Postgres local, sem teste automatizado. Priority: High.
 - **Store com Supabase mockado** — só smoke de renderização (`src/test/paginas.smoke.test.tsx`). Priority: Medium.
-- **Edge Functions** — sem testes. Priority: Medium.
+- **Edge Functions** — `telegram-bot` testado no Vitest (módulos puros + handler com Telegram/Gemini/repo mockados); `repo.ts` (queries reais) e as outras duas functions sem testes. Sem `deno check` automatizado. Priority: Medium.
 - **E2E** — Playwright config depende de `lovable-agent-playwright-config` (não instalado). Priority: Low.
