@@ -20,7 +20,7 @@ import { formatDiaMesData, formatMesAno } from "@/lib/format";
 import { cartaoConfigurado, faturaDoCartao, parseISODate, toISODate, type MesAno } from "@/lib/fatura";
 import { competenciaDoLancamento } from "@/lib/recorrencias";
 import { aplicarAPartirDe } from "@/lib/parcelamento-ops";
-import { normalizarTexto } from "@/lib/texto";
+import { sugerir } from "@/lib/sugestao";
 import { toast } from "sonner";
 
 export interface LancamentoSalvo {
@@ -38,21 +38,6 @@ interface LancamentoFormProps {
 
 const SEM = "__nenhum__";
 const catKeys = Object.keys(CATEGORIAS) as Categoria[];
-
-/** Subcategoria e cartão mais usados em lançamentos com descrição igual ou que começa igual. */
-function sugerir(descricao: string, historico: Lancamento[]) {
-  const n = normalizarTexto(descricao);
-  if (n.length < 3) return null;
-  const parecidos = historico.filter((l) => {
-    const d = normalizarTexto(l.descricao);
-    return d === n || d.startsWith(n);
-  });
-  const maisComum = (valores: (string | null)[]) => {
-    const contagem = valores.filter(Boolean).reduce((m, v) => m.set(v, (m.get(v) ?? 0) + 1), new Map<string, number>());
-    return [...contagem.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
-  };
-  return { subcategoria: maisComum(parecidos.map((l) => l.subcategoria)), cartaoId: maisComum(parecidos.map((l) => l.cartaoId)) };
-}
 
 export function LancamentoForm({ open, onOpenChange, lancamento, inicial, onSalvo }: LancamentoFormProps) {
   const {
