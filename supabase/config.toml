@@ -14,3 +14,10 @@ entrypoint = "./functions/consultor-financeiro/index.ts"
 enabled = true
 verify_jwt = true
 entrypoint = "./functions/chat-financeiro/index.ts"
+
+[functions.telegram-bot]
+enabled = true
+# O Telegram não envia JWT; a segurança vem do header X-Telegram-Bot-Api-Secret-Token (TELEGRAM_WEBHOOK_SECRET).
+verify_jwt = false
+import_map = "./functions/telegram-bot/deno.json"
+entrypoint = "./functions/telegram-bot/index.ts"
