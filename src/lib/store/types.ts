@@ -2,7 +2,7 @@
 
 export type Categoria = "entrada" | "conta_fixa" | "cartao" | "variavel";
 export type StatusLancamento = "pago" | "pendente";
-export type OrigemLancamento = "manual" | "parcela" | "recorrente" | "importado";
+export type OrigemLancamento = "manual" | "parcela" | "recorrente" | "importado" | "telegram";
 export type TipoSubcategoria = "necessidade" | "desejo" | "poupanca" | "terceiros" | "doacao";
 export type NivelPrioridade = "alta" | "media" | "baixa";
 

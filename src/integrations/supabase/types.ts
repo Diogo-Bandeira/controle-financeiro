@@ -245,6 +245,44 @@ export type Database = {
         }
         Relationships: []
       }
+      ia_uso_diario: {
+        Row: {
+          chamadas: number
+          created_at: string
+          dia: string
+          erros_429: number
+          household_id: string
+          limite_diario_atingido: boolean
+          updated_at: string
+        }
+        Insert: {
+          chamadas?: number
+          created_at?: string
+          dia: string
+          erros_429?: number
+          household_id: string
+          limite_diario_atingido?: boolean
+          updated_at?: string
+        }
+        Update: {
+          chamadas?: number
+          created_at?: string
+          dia?: string
+          erros_429?: number
+          household_id?: string
+          limite_diario_atingido?: boolean
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ia_uso_diario_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       lancamentos: {
         Row: {
           ano: number
@@ -847,6 +885,174 @@ export type Database = {
           },
         ]
       }
+      telegram_codigos: {
+        Row: {
+          codigo: string
+          created_at: string
+          expira_em: string
+          household_id: string
+          id: string
+          usado_em: string | null
+          user_id: string
+        }
+        Insert: {
+          codigo: string
+          created_at?: string
+          expira_em?: string
+          household_id: string
+          id?: string
+          usado_em?: string | null
+          user_id: string
+        }
+        Update: {
+          codigo?: string
+          created_at?: string
+          expira_em?: string
+          household_id?: string
+          id?: string
+          usado_em?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "telegram_codigos_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      telegram_mensagens: {
+        Row: {
+          chat_id: number
+          created_at: string
+          household_id: string
+          id: string
+          lancamento_ids: string[]
+          parcelamento_id: string | null
+          tipo: string
+          update_id: number
+          usou_ia: boolean
+        }
+        Insert: {
+          chat_id: number
+          created_at?: string
+          household_id: string
+          id?: string
+          lancamento_ids?: string[]
+          parcelamento_id?: string | null
+          tipo: string
+          update_id: number
+          usou_ia?: boolean
+        }
+        Update: {
+          chat_id?: number
+          created_at?: string
+          household_id?: string
+          id?: string
+          lancamento_ids?: string[]
+          parcelamento_id?: string | null
+          tipo?: string
+          update_id?: number
+          usou_ia?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "telegram_mensagens_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "telegram_mensagens_parcelamento_id_fkey"
+            columns: ["parcelamento_id"]
+            isOneToOne: false
+            referencedRelation: "parcelamentos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      telegram_pendencias: {
+        Row: {
+          chat_id: number
+          created_at: string
+          expira_em: string
+          household_id: string
+          id: string
+          payload: Json
+        }
+        Insert: {
+          chat_id: number
+          created_at?: string
+          expira_em?: string
+          household_id: string
+          id?: string
+          payload: Json
+        }
+        Update: {
+          chat_id?: number
+          created_at?: string
+          expira_em?: string
+          household_id?: string
+          id?: string
+          payload?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "telegram_pendencias_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      telegram_vinculos: {
+        Row: {
+          ativo: boolean
+          chat_id: number
+          created_at: string
+          household_id: string
+          id: string
+          nome_exibicao: string | null
+          telegram_user_id: number | null
+          telegram_username: string | null
+          user_id: string
+        }
+        Insert: {
+          ativo?: boolean
+          chat_id: number
+          created_at?: string
+          household_id: string
+          id?: string
+          nome_exibicao?: string | null
+          telegram_user_id?: number | null
+          telegram_username?: string | null
+          user_id: string
+        }
+        Update: {
+          ativo?: boolean
+          chat_id?: number
+          created_at?: string
+          household_id?: string
+          id?: string
+          nome_exibicao?: string | null
+          telegram_user_id?: number | null
+          telegram_username?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "telegram_vinculos_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -860,10 +1066,117 @@ export type Database = {
         }
         Returns: Json
       }
+      bot_excluir_lancamentos: {
+        Args: {
+          p_household_id: string
+          p_ids?: string[]
+          p_parcelamento_id?: string
+        }
+        Returns: number
+      }
+      bot_inserir_lancamentos: {
+        Args: { p_household_id: string; p_lancamentos: Json }
+        Returns: {
+          ano: number
+          cartao_id: string | null
+          cartao_nome: string | null
+          categoria: string
+          created_at: string
+          created_by: string | null
+          data: string
+          descricao: string
+          household_id: string
+          id: string
+          mes: number
+          observacao: string | null
+          origem: string
+          parcela_num: number | null
+          parcelamento_id: string | null
+          recorrencia_id: string | null
+          reembolso: boolean
+          responsavel: string | null
+          status: string
+          subcategoria: string | null
+          updated_at: string
+          valor: number
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "lancamentos"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      bot_limpar_antigos: { Args: never; Returns: undefined }
+      bot_registrar_uso_ia: {
+        Args: {
+          p_chamadas?: number
+          p_erros_429?: number
+          p_household_id: string
+          p_limite_diario?: boolean
+        }
+        Returns: {
+          chamadas: number
+          created_at: string
+          dia: string
+          erros_429: number
+          household_id: string
+          limite_diario_atingido: boolean
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "ia_uso_diario"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      bot_salvar_parcelamento: {
+        Args: {
+          p_apagar_ids?: string[]
+          p_household_id: string
+          p_lancamentos?: Json
+          p_parcelamento: Json
+        }
+        Returns: Json
+      }
+      bot_vincular_telegram: {
+        Args: {
+          p_chat_id: number
+          p_codigo: string
+          p_nome_telegram: string
+          p_telegram_user_id: number
+          p_telegram_username: string
+        }
+        Returns: {
+          ativo: boolean
+          chat_id: number
+          created_at: string
+          household_id: string
+          id: string
+          nome_exibicao: string | null
+          telegram_user_id: number | null
+          telegram_username: string | null
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "telegram_vinculos"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       entrar_household: { Args: { _codigo: string }; Returns: string }
       excluir_parcelamento: {
         Args: { p_id: string; p_manter_ids?: string[] }
         Returns: undefined
+      }
+      gerar_codigo_telegram: {
+        Args: never
+        Returns: {
+          codigo: string
+          expira_em: string
+        }[]
       }
       get_user_household_id: { Args: { _user_id: string }; Returns: string }
       inserir_lancamentos: {
@@ -899,10 +1212,52 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      inserir_lancamentos_no_household: {
+        Args: { p_household: string; p_lancamentos: Json }
+        Returns: {
+          ano: number
+          cartao_id: string | null
+          cartao_nome: string | null
+          categoria: string
+          created_at: string
+          created_by: string | null
+          data: string
+          descricao: string
+          household_id: string
+          id: string
+          mes: number
+          observacao: string | null
+          origem: string
+          parcela_num: number | null
+          parcelamento_id: string | null
+          recorrencia_id: string | null
+          reembolso: boolean
+          responsavel: string | null
+          status: string
+          subcategoria: string | null
+          updated_at: string
+          valor: number
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "lancamentos"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       normalizar_nome_cartao: { Args: { _nome: string }; Returns: string }
       salvar_parcelamento: {
         Args: {
           p_apagar_ids?: string[]
+          p_lancamentos?: Json
+          p_parcelamento: Json
+        }
+        Returns: Json
+      }
+      salvar_parcelamento_no_household: {
+        Args: {
+          p_apagar_ids?: string[]
+          p_household: string
           p_lancamentos?: Json
           p_parcelamento: Json
         }
