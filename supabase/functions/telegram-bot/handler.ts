@@ -11,10 +11,10 @@ import { escaparHtml } from "./html.ts";
 import { ErroIA, paraBase64, type InterpretarComIA, type TipoErroIA } from "./gemini.ts";
 import {
   AJUDA, CODIGO_INVALIDO, FALLBACK_FALHA, FALLBACK_LIMITE, FALLBACK_MIDIA_LIMITE, FALLBACK_MINUTO, INSTRUCOES_VINCULO, LIMITE_POR_HORA,
-  MIDIA_GRANDE, MIDIA_NAO_SUPORTADA, NAO_ENTENDI, OPCOES_TIPO, PERGUNTA_EXPIRADA, agruparGravados, boasVindas,
+  MIDIA_GRANDE, MIDIA_NAO_SUPORTADA, NAO_ENTENDI, NEGATIVO_PARCELADO, OPCOES_TIPO, PERGUNTA_EXPIRADA, agruparGravados, boasVindas,
   formatarConfirmacao, tecladoConfirmacao, tecladoOpcoes, textoPergunta, type ItemGravado, type UsoSubcategoria,
 } from "./mensagens.ts";
-import { campoFaltante, completarPeloHistorico, montarGravacao, type CampoFaltante } from "./montagem.ts";
+import { campoFaltante, completarPeloHistorico, montarGravacao, negativoParcelado, type CampoFaltante } from "./montagem.ts";
 import { encontrarCartao, interpretarLocal, type ContextoParser } from "./parser.ts";
 import type { Repositorio, TipoMensagem } from "./repo.ts";
 import type { TelegramApi } from "./telegram.ts";
@@ -222,6 +222,7 @@ export function criarHandler(deps: Dependencias): (req: Request) => Promise<Resp
   }
 
   async function lancar(s: Sessao, rascunhos: Rascunho[]) {
+    if (rascunhos.some(negativoParcelado)) return telegram.enviar(s.chatId, NEGATIVO_PARCELADO);
     const historico = await repo.historico(s.vinculo.householdId);
     const completos = rascunhos.map((r) => completarPeloHistorico(r, historico, s.ctx.cartoes));
     await prosseguir(s, s.registroId, completos, null);

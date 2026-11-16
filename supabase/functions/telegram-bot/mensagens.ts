@@ -8,8 +8,8 @@ import { escaparHtml } from "./html.ts";
 const BRL = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 const MESES_CURTOS = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
 
-/** "R$ 1.300,50" (espaço comum no lugar do não separável do Intl). */
-export const brl = (v: number): string => BRL.format(v).replace(/\s/g, " ");
+/** "R$ 1.300,50" / "− R$ 300,00" (espaço comum no lugar do não separável do Intl). */
+export const brl = (v: number): string => (v < 0 ? `− ${brl(-v)}` : BRL.format(v).replace(/\s/g, " "));
 export const mesAno = ({ mes, ano }: MesAno): string => `${MESES_CURTOS[mes]}/${ano}`;
 export const diaMes = (iso: string): string => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
 export const diaMesData = (d: Date): string => `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -83,14 +83,19 @@ function blocoItem(item: ItemGravado, uso: UsoSubcategoria | null, ctx: Contexto
     ];
   }
 
+  const credito = primeiro.valor < 0;
+  // Crédito sem subcategoria (ex.: pagamento antecipado) não mostra "Sem subcategoria".
+  const sub = credito && !primeiro.subcategoria ? [] : [nomeSub(primeiro.subcategoria, ctx.subcategorias)];
   const detalhes = (() => {
     if (primeiro.categoria === "entrada") return ["Entrada", diaMes(primeiro.data), ...(primeiro.reembolso ? ["reembolso"] : [])];
     if (primeiro.categoria === "cartao" && cartaoConfigurado(cartao)) {
       const { dataVencimento } = datasDaFatura(primeiro, cartao.diaFechamento, cartao.diaVencimento);
-      return [nomeSub(primeiro.subcategoria, ctx.subcategorias), escaparHtml(cartao.nome), `fatura de ${mesAno(primeiro)} (vence ${diaMesData(dataVencimento)})`];
+      const fatura = `fatura de ${mesAno(primeiro)} (vence ${diaMesData(dataVencimento)})`;
+      return [...sub, escaparHtml(cartao.nome), credito ? `Crédito na ${fatura}` : fatura];
     }
     return [
-      nomeSub(primeiro.subcategoria, ctx.subcategorias),
+      ...sub,
+      ...(credito ? ["Crédito"] : []),
       TIPOS_LABEL[primeiro.categoria],
       diaMes(primeiro.data),
       ...(primeiro.status === "pendente" ? ["pendente"] : []),
@@ -159,6 +164,7 @@ export const EXEMPLOS = [
   "• <code>tênis 600 3x bradesco</code> ou <code>tênis 3x200 bradesco</code>",
   "• <code>+5000 salário</code> ou <code>recebi 200 reembolso</code>",
   "• <code>conta de luz 180 10/11</code>",
+  "• <code>estorno 50 nubank</code>, <code>-50 nubank</code> ou <code>antecipei 300 nubank</code> (crédito na fatura)",
   "• áudio ou foto do comprovante",
   "• <code>quanto gastei em lazer?</code>",
 ].join("\n");
@@ -194,6 +200,8 @@ export const FALLBACK_MINUTO = "Muitas mensagens para a IA em pouco tempo. Tente
 export const FALLBACK_FALHA =
   "Não consegui interpretar agora. Mande no formato <code>descrição valor cartão</code> (ex.: <code>mercado 130 nubank</code>) ou lance pelo site.";
 export const NAO_ENTENDI = `Não entendi. Exemplos:\n${EXEMPLOS}`;
+export const NEGATIVO_PARCELADO =
+  "Valor negativo (estorno, crédito ou pagamento antecipado) não pode ser parcelado. Mande de novo sem as parcelas, ex.: <code>estorno 50 nubank</code>.";
 export const MIDIA_GRANDE = "Esse arquivo é grande demais para mim (até 2 min de áudio e 5 MB). Mande em texto, ex.: <code>mercado 130 nubank</code>.";
 export const MIDIA_NAO_SUPORTADA = "Por enquanto entendo texto, áudio e foto. Mande em texto, ex.: <code>mercado 130 nubank</code>.";
 export const LIMITE_POR_HORA = "Muitas mensagens na última hora. Aguarde um pouco e tente de novo.";

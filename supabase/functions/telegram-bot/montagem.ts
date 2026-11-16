@@ -21,17 +21,21 @@ export function completarPeloHistorico(r: Rascunho, historico: LancamentoHistori
     ...r,
     tipo,
     cartaoId: tipo === "cartao" ? r.cartaoId ?? cartaoSugerido ?? unico : null,
-    subcategoria: tipo === "entrada" ? null : r.subcategoria ?? s?.subcategoria ?? null,
+    // Negativo (crédito): subcategoria só se a mensagem disser; não usa o histórico.
+    subcategoria: tipo === "entrada" ? null : r.subcategoria ?? (r.valor < 0 ? null : s?.subcategoria ?? null),
   };
 }
 
-/** Próxima pergunta necessária, na ordem tipo → cartão → subcategoria. null = completo. */
+/** Próxima pergunta necessária, na ordem tipo → cartão → subcategoria (não perguntada se negativo). null = completo. */
 export function campoFaltante(r: Rascunho): CampoFaltante | null {
   if (!r.tipo) return "tipo";
   if (r.tipo === "cartao" && !r.cartaoId) return "cartao";
-  if (r.tipo !== "entrada" && !r.subcategoria) return "subcategoria";
+  if (r.tipo !== "entrada" && r.valor > 0 && !r.subcategoria) return "subcategoria";
   return null;
 }
+
+/** Lançamento negativo é sempre avulso: com parcelas, o bot recusa. */
+export const negativoParcelado = (r: Rascunho): boolean => r.valor < 0 && r.parcelas > 1;
 
 export interface ContextoMontagem {
   hoje: string;

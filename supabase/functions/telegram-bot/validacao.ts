@@ -4,9 +4,8 @@
 import { round2 } from "../_shared/dominio/money.ts";
 import { dataNaFaixa, isoValida } from "./datas.ts";
 import { encontrarCartao, encontrarSubcategoria, type ContextoParser } from "./parser.ts";
-import { CATEGORIAS_VALIDAS, type Categoria, type Consulta, type Rascunho, type TipoConsulta } from "./tipos.ts";
+import { CATEGORIAS_VALIDAS, VALOR_MAXIMO, type Categoria, type Consulta, type Rascunho, type TipoConsulta } from "./tipos.ts";
 
-export const VALOR_MAXIMO = 100_000;
 export const PARCELAS_MAXIMO = 48;
 
 export type Intencao = "lancamento" | "consulta" | "ajuda" | "outro";
@@ -36,7 +35,8 @@ export function validarRascunho(bruto: unknown, ctx: ContextoParser): Rascunho |
 
   const valorEParcela = bruto.valor_e_parcela === true && parcelas > 1;
   const total = valorEParcela ? valor * parcelas : valor;
-  if (valor <= 0 || total > VALOR_MAXIMO) return null;
+  // Negativo (crédito) é aceito; com parcelas o handler recusa e pede o valor sem parcelas.
+  if (valor === 0 || Math.abs(total) > VALOR_MAXIMO) return null;
 
   const data = typeof bruto.data === "string" && isoValida(bruto.data) && dataNaFaixa(bruto.data, ctx.hoje) ? bruto.data : ctx.hoje;
   const tipoBruto = CATEGORIAS_VALIDAS.includes(bruto.tipo as Categoria) ? (bruto.tipo as Categoria) : null;

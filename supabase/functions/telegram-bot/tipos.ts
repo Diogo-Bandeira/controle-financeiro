@@ -3,6 +3,9 @@
 export type Categoria = "entrada" | "conta_fixa" | "cartao" | "variavel";
 export const CATEGORIAS_VALIDAS: Categoria[] = ["entrada", "conta_fixa", "cartao", "variavel"];
 
+/** Limite pelo valor absoluto (negativo = estorno/crédito/pagamento antecipado). */
+export const VALOR_MAXIMO = 100_000;
+
 export interface CartaoBot {
   id: string;
   nome: string;

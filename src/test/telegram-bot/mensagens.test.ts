@@ -19,6 +19,17 @@ describe("formatarConfirmacao", () => {
     );
   });
 
+  it("crédito no cartão: − R$ e 'Crédito na fatura'", () => {
+    const [item] = agruparGravados([lanc({ descricao: "Pagamento antecipado", valor: -300, subcategoria: null })]);
+    expect(formatarConfirmacao([{ item, uso: null }], ctx)).toBe(
+      "Lançado ✅\n<b>Pagamento antecipado</b> — − R$ 300,00\nNubank · Crédito na fatura de dez/2026 (vence 10/12)",
+    );
+    const [estorno] = agruparGravados([lanc({ descricao: "Estorno", valor: -50, categoria: "variavel", cartao_id: null })]);
+    expect(formatarConfirmacao([{ item: estorno, uso: uso(762.4) }], ctx)).toBe(
+      "Lançado ✅\n<b>Estorno</b> — − R$ 50,00\nAlimentação · Crédito · Pix/Débito/Dinheiro · 05/11\nAlimentação no mês: R$ 762,40 de R$ 1.880,00 (41%)",
+    );
+  });
+
   it("parcelado: N× valor e meses da primeira à última", () => {
     const parcelas = [12, 0, 1].map((_, i) =>
       lanc({ id: `p${i}`, descricao: "Tênis", valor: 200, parcelamento_id: "pa1", parcela_num: i + 1, cartao_id: "c-bradesco", mes: (11 + i) % 12, ano: i === 0 ? 2026 : 2027, subcategoria: "gastos_extras" }),

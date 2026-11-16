@@ -37,7 +37,7 @@ export function montarSchema(cartoes: CartaoBot[], subcategorias: SubcategoriaBo
           type: "OBJECT",
           properties: {
             descricao: { type: "STRING" },
-            valor: { type: "NUMBER" },
+            valor: { type: "NUMBER", description: "Em reais; negativo para estorno, crédito, reembolso na fatura ou pagamento antecipado. Nunca 0." },
             valor_e_parcela: { type: "BOOLEAN" },
             parcelas: { type: "INTEGER" },
             data: { type: "STRING", description: "YYYY-MM-DD" },
@@ -86,6 +86,7 @@ Regras:
 - intencao "ajuda": pede instruções. "outro": nada disso.
 - descricao: curta, como a pessoa escreveria (ex.: "Mercado", "Uber", "Farmácia"); para comprovante, o nome do estabelecimento.
 - valor em reais (número). Se a pessoa disser o valor de cada parcela ("3x de 200"), valor = 200 e valor_e_parcela = true; se disser o total ("600 em 3x"), valor = 600 e valor_e_parcela = false.
+- valor negativo: estorno, crédito ou reembolso lançado na fatura do cartão, pagamento antecipado de fatura ("antecipei 300 nubank") ou correção de entrada a menor. Ex.: "estorno 50 nubank" = valor -50, tipo "cartao". Pagamento antecipado: subcategoria null. Sem cartão citado: tipo "variavel". Negativo não é parcelado: se a mensagem citar parcelas, mantenha o número citado (o bot pede para mandar sem parcelas). Subcategoria de negativo só se a mensagem disser qual.
 - parcelas: 1 se à vista. Parcelado só existe no cartão.
 - data: YYYY-MM-DD. Sem data na mensagem = hoje. "ontem" = dia anterior. Comprovante: a data impressa nele.
 - tipo: "entrada" para dinheiro recebido (salário, reembolso, "recebi"); "cartao" quando citar cartão de crédito ou um cartão da lista; "conta_fixa" para contas e boletos (luz, água, internet, aluguel); "variavel" para pix, débito, dinheiro ou quando não houver forma de pagamento.

@@ -16,7 +16,7 @@ describe("validarSaidaIA", () => {
 
   it("descarta valores fora da faixa e parcelas inválidas", () => {
     const r = validar([
-      item({ valor: 0 }), item({ valor: -5 }), item({ valor: 100_000.01 }), item({ valor: "130" }),
+      item({ valor: 0 }), item({ valor: -100_000.01 }), item({ valor: 100_000.01 }), item({ valor: "130" }),
       item({ valor: 40_000, valor_e_parcela: true, parcelas: 3, tipo: "cartao" }),
       item({ parcelas: 49, tipo: "cartao" }), item({ parcelas: 0 }), item({ parcelas: 2.5 }),
       item({ valor: 100_000 }),
@@ -24,6 +24,18 @@ describe("validarSaidaIA", () => {
     expect(r.rascunhos).toHaveLength(1);
     expect(r.rascunhos[0].valor).toBe(100_000);
     expect(r.descartados).toBe(8);
+  });
+
+  it("aceita valor negativo (crédito) dentro do limite absoluto; zero é descartado", () => {
+    const r = validar([
+      item({ descricao: "Estorno", valor: -50, tipo: "cartao", cartao: "Nubank", subcategoria: null }),
+      item({ valor: -100_000 }),
+      item({ valor: 0 }),
+      item({ valor: -0.001 }),
+    ]);
+    expect(r.rascunhos.map((x) => x.valor)).toEqual([-50, -100_000]);
+    expect(r.rascunhos[0]).toMatchObject({ tipo: "cartao", cartaoId: "c-nubank", subcategoria: null });
+    expect(r.descartados).toBe(2);
   });
 
   it("cartão e subcategoria inexistentes viram null; existentes casam sem acento/caixa", () => {

@@ -66,6 +66,15 @@ describe("completarPeloHistorico e campoFaltante", () => {
     expect(campoFaltante(r)).toBeNull();
   });
 
+  it("negativo: não pega subcategoria do histórico nem pergunta; mantém a da mensagem", () => {
+    const sem = completarPeloHistorico(rascunho({ valor: -50, tipo: "cartao", cartaoId: "c-nubank", subcategoria: null }), historico, CARTOES);
+    expect(sem.subcategoria).toBeNull();
+    expect(campoFaltante(sem)).toBeNull();
+    const com = completarPeloHistorico(rascunho({ valor: -50, tipo: "cartao", cartaoId: "c-nubank", subcategoria: "lazer" }), historico, CARTOES);
+    expect(com.subcategoria).toBe("lazer");
+    expect(montarGravacao(com, ctx)).toMatchObject({ tipo: "simples", lancamento: { valor: -50, subcategoria: "lazer", categoria: "cartao" } });
+  });
+
   it("explícito na mensagem vence o histórico", () => {
     const r = completarPeloHistorico(rascunho({ tipo: "variavel", subcategoria: "lazer" }), historico, CARTOES);
     expect(r).toMatchObject({ tipo: "variavel", cartaoId: null, subcategoria: "lazer" });

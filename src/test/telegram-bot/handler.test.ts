@@ -125,6 +125,24 @@ describe("handler do webhook", () => {
     expect(t.repo.salvarResultado).toHaveBeenCalledWith("reg-4", ["l0"], null);
   });
 
+  it("estorno no cartão: grava negativo sem subcategoria e sem perguntar", async () => {
+    const t = montar();
+    await t.enviar(texto(20, "antecipei 300 nubank"));
+    expect(t.ia).not.toHaveBeenCalled();
+    expect(t.repo.criarPendencia).not.toHaveBeenCalled();
+    expect(t.gravados[0]).toMatchObject({ descricao: "Pagamento antecipado", valor: -300, categoria: "cartao", cartao_id: "c-nubank", subcategoria: null, mes: 10, ano: 2026 });
+    expect(t.enviados[0]).toContain("<b>Pagamento antecipado</b> — − R$ 300,00\nNubank · Crédito na fatura de nov/2026 (vence 10/11)");
+  });
+
+  it("negativo com parcelas (-50 3x nubank) é recusado pedindo o valor sem parcelas", async () => {
+    const t = montar();
+    await t.enviar(texto(21, "-50 3x nubank"));
+    expect(t.ia).not.toHaveBeenCalled();
+    expect(t.repo.inserirLancamentos).not.toHaveBeenCalled();
+    expect(t.repo.salvarParcelamento).not.toHaveBeenCalled();
+    expect(t.enviados[0]).toContain("não pode ser parcelado");
+  });
+
   it("429 diário → mensagem de fallback e registro do erro", async () => {
     const t = montar({ iaFalha: new ErroIA("limite_diario", 429) });
     await t.enviar(texto(5, "paguei o encanador semana passada"));

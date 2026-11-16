@@ -5,7 +5,7 @@
 import { normalizarTexto } from "../_shared/dominio/texto.ts";
 import { somarMeses } from "../_shared/dominio/fatura.ts";
 import { mesDe, resolverData } from "./datas.ts";
-import type { CartaoBot, Categoria, Consulta, Rascunho, SubcategoriaBot } from "./tipos.ts";
+import { VALOR_MAXIMO, type CartaoBot, type Categoria, type Consulta, type Rascunho, type SubcategoriaBot } from "./tipos.ts";
 
 export interface ContextoParser {
   hoje: string;
@@ -122,6 +122,17 @@ const PALAVRAS_TIPO: Record<string, { tipo: Categoria; manter?: boolean; reembol
 };
 const PRIORIDADE_TIPO: Categoria[] = ["entrada", "cartao", "conta_fixa", "variavel"];
 
+/** Palavras que tornam o valor negativo (abate o total); "crédito" só no começo ("crédito 50 nubank"), senão é forma de pagamento. */
+const PALAVRAS_CREDITO: Record<string, { manter: boolean; antecipado?: boolean }> = {
+  estorno: { manter: true },
+  estornado: { manter: true },
+  antecipado: { manter: true, antecipado: true },
+  antecipacao: { manter: true, antecipado: true },
+  antecipei: { manter: false, antecipado: true },
+};
+const CREDITO_NO_INICIO = "credito";
+const SINAL_NEGATIVO_RE = /^[-−]/;
+
 const CONECTORES = new Set(["no", "na", "em", "de", "do", "da", "com", "pelo", "pela", "pro", "pra", "para", "e", "via"]);
 const DESCARTAVEIS = new Set(["r", "reais", "real"]);
 
@@ -136,6 +147,8 @@ const aparar = (tokens: Token[]): Token[] => {
 };
 
 const capitalizar = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
+
+const descricaoDoCredito = (antecipado: boolean): string => (antecipado ? "Pagamento antecipado" : "Crédito");
 
 // ─── Lançamento ──────────────────────────────────────────────────────────────
 
@@ -168,15 +181,18 @@ export function interpretarLancamento(texto: string, ctx: ContextoParser): Rascu
   let parcelas = 1;
   let data = ctx.hoje;
   let valores = 0;
+  let negativo = false;
+  let antecipado = false;
   const resto: Token[] = [];
 
-  for (const t of tokens) {
+  for (const [i, t] of tokens.entries()) {
     const semPonto = t.bruto.replace(/[.,;:!]+$/, "");
     const parcelaComValor = PARCELAS_VALOR_RE.exec(semPonto);
     const valorDaParcela = parcelaComValor ? lerValor(parcelaComValor[2]) : null;
     const nParcelas = PARCELAS_RE.exec(semPonto);
-    const v = lerValor(semPonto);
+    const v = lerValor(semPonto.replace(SINAL_NEGATIVO_RE, ""));
     const d = resolverData(semPonto, ctx.hoje);
+    const credito = i === 0 && t.norm === CREDITO_NO_INICIO ? { manter: true } : PALAVRAS_CREDITO[t.norm];
     const palavra = PALAVRAS_TIPO[t.norm];
 
     if (nParcelas) {
@@ -189,10 +205,15 @@ export function interpretarLancamento(texto: string, ctx: ContextoParser): Rascu
     } else if (v != null) {
       valor = v;
       valores++;
+      negativo ||= SINAL_NEGATIVO_RE.test(semPonto);
     } else if (d) {
       data = d;
     } else if (t.bruto.toLowerCase() === "r$" || DESCARTAVEIS.has(t.norm)) {
       // "R$ 130", "130 reais"
+    } else if (credito) {
+      negativo = true;
+      antecipado ||= !!credito.antecipado;
+      if (credito.manter) resto.push(t);
     } else if (palavra) {
       tipos.add(palavra.tipo);
       reembolso ||= !!palavra.reembolso;
@@ -202,7 +223,8 @@ export function interpretarLancamento(texto: string, ctx: ContextoParser): Rascu
     }
   }
 
-  if (valores !== 1 || valor == null || valor <= 0) return null;
+  if (valores !== 1 || valor == null || valor === 0) return null;
+  if ((valorEParcela ? valor * parcelas : valor) > VALOR_MAXIMO) return null;
   if (resto.some((t) => !temLetra(t.bruto))) return null;
   if (parcelas < 1 || parcelas > 48) return null;
 
@@ -212,21 +234,25 @@ export function interpretarLancamento(texto: string, ctx: ContextoParser): Rascu
   if (sub && sub.trecho.inicio > 0) {
     descricaoTokens = aparar([...descricaoTokens.slice(0, sub.trecho.inicio), ...descricaoTokens.slice(sub.trecho.fim)]);
   }
-  const descricao = descricaoTokens.map((t) => t.bruto).join(" ").replace(/[,;:!]+$/, "");
+  const lida = descricaoTokens.map((t) => t.bruto).join(" ").replace(/[,;:!]+$/, "");
+  const descricao = lida || (negativo ? descricaoDoCredito(antecipado) : "");
   if (!temLetra(descricao) || descricao.length > 80) return null;
 
-  const tipo = parcelas > 1 ? "cartao" : PRIORIDADE_TIPO.find((p) => tipos.has(p)) ?? null;
+  // Negativo com parcelas segue como rascunho: o handler recusa e pede o valor sem parcelas.
+  const tipoLido = parcelas > 1 ? "cartao" : PRIORIDADE_TIPO.find((p) => tipos.has(p)) ?? null;
+  const tipo = negativo && !tipoLido ? "variavel" : tipoLido;
   if (parcelas > 1 && tipos.has("entrada")) return null;
 
   return {
     descricao: capitalizar(descricao),
-    valor,
+    valor: negativo ? -valor : valor,
     valorEParcela,
     parcelas,
     data,
     tipo,
     cartaoId: tipo === "cartao" ? cartao?.id ?? null : null,
-    subcategoria: tipo === "entrada" ? null : sub?.slug ?? null,
+    // Pagamento antecipado não é gasto de nenhuma subcategoria.
+    subcategoria: tipo === "entrada" || antecipado ? null : sub?.slug ?? null,
     reembolso: tipo === "entrada" && reembolso,
   };
 }

@@ -69,6 +69,33 @@ describe("interpretarLancamento", () => {
     expect(ler("mercado 130")?.subcategoria).toBeNull();
   });
 
+  it("valor negativo: '-', estorno e crédito no começo → cartão negativo", () => {
+    expect(ler("-50 nubank")).toMatchObject({ descricao: "Crédito", valor: -50, tipo: "cartao", cartaoId: "c-nubank", parcelas: 1, subcategoria: null });
+    expect(ler("estorno 50 nubank")).toMatchObject({ descricao: "Estorno", valor: -50, tipo: "cartao", cartaoId: "c-nubank", subcategoria: null });
+    expect(ler("crédito 50 nubank")).toMatchObject({ descricao: "Crédito", valor: -50, tipo: "cartao", cartaoId: "c-nubank" });
+    expect(ler("estorno cinema 40,50 nubank lazer")).toMatchObject({ descricao: "Estorno cinema", valor: -40.5, subcategoria: "lazer" });
+    expect(ler("mercado 50 crédito")).toMatchObject({ valor: 50, tipo: "cartao", cartaoId: null });
+  });
+
+  it("pagamento antecipado → cartão negativo sem subcategoria", () => {
+    expect(ler("antecipei 300 nubank")).toMatchObject({ descricao: "Pagamento antecipado", valor: -300, tipo: "cartao", cartaoId: "c-nubank", subcategoria: null });
+    expect(ler("pagamento antecipado 300 nubank")).toMatchObject({ descricao: "Pagamento antecipado", valor: -300, cartaoId: "c-nubank", subcategoria: null });
+    expect(ler("antecipei 300 nubank lazer")?.subcategoria).toBeNull();
+  });
+
+  it("estorno/crédito/antecipado sem cartão → variável negativo", () => {
+    expect(ler("estorno 50")).toMatchObject({ valor: -50, tipo: "variavel", cartaoId: null });
+    expect(ler("crédito 20")).toMatchObject({ valor: -20, tipo: "variavel" });
+    expect(ler("-15 padaria")).toMatchObject({ descricao: "Padaria", valor: -15, tipo: "variavel" });
+  });
+
+  it("negativo com parcelas vira rascunho parcelado (o handler recusa); limite pelo absoluto", () => {
+    expect(ler("-50 3x nubank")).toMatchObject({ valor: -50, parcelas: 3 });
+    expect(ler("-0 nubank")).toBeNull();
+    expect(ler("estorno 100000,01 nubank")).toBeNull();
+    expect(ler("estorno 100000 nubank")?.valor).toBe(-100_000);
+  });
+
   it("recusa o que não é seguro", () => {
     expect(ler("mercado 130 e farmácia 45")).toBeNull();
     expect(ler("130")).toBeNull();
