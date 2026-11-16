@@ -57,7 +57,7 @@ export function respostaDeErro(req: Request, error: unknown, contexto: string): 
 export const DICIONARIO_CONTEXTO = `Dicionário dos dados financeiros recebidos (JSON):
 - periodo.mes vai de 0 a 11 (0 = Janeiro, 11 = Dezembro); periodo.ano é o ano. Todos os campos "mes" seguem essa convenção.
 - resumo: entradas (inclui reembolsos), reembolsos (dinheiro que voltou de compras feitas para terceiros), rendaPlanejamento (= entradas − reembolsos; use esta como renda real), totalSaidas, saldo.
-- lancamentos: lançamentos do mês. cat: entrada | conta_fixa | cartao | variavel. subcat: subcategoria de gasto. status: pago | pendente. parcela: número da parcela quando vem de um parcelamento. Para cartão, o mês é o da fatura (vencimento).
+- lancamentos: lançamentos do mês. cat: entrada | conta_fixa | cartao | variavel. subcat: subcategoria de gasto. status: pago | pendente. parcela: número da parcela quando vem de um parcelamento. Para cartão, o mês é o da fatura (vencimento). valor negativo = estorno, crédito ou pagamento antecipado de fatura (em saídas) ou correção/devolução (em entradas): já abate os totais, faturas e gastos por subcategoria; não trate como gasto nem some em módulo.
 - cartoes: cartões ativos com dia de fechamento/vencimento, limite e as faturas do mês atual e dos 2 seguintes (total e status: aberta, fechada, paga ou futura).
 - parcelasFuturas: soma das parcelas de cartão já lançadas em cada um dos próximos 6 meses.
 - limites: limite efetivo e gasto de cada subcategoria no mês; contaNoOrcamento=false significa fora do orçamento pessoal.
