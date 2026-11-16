@@ -36,6 +36,7 @@ flowchart LR
 - `recorrencias`: sempre lançadas numa janela móvel de `MESES_RECORRENCIA` = 6 meses de **data** (mês atual + 5). Unique parcial `(recorrencia_id, mês da data)` evita duplicar. `recorrencias_excecoes` (mês da data) = mês excluído só uma vez, não é regerado. Gerado com data > hoje → `pendente` (cartão: status vem da fatura, campo fica `pago`). "Editado individualmente" = valor ou descrição ≠ recorrência.
 - `metas.valor_atual` = saldo inicial; atual = saldo inicial + Σ `aportes`.
 - Renda para planejamento = entradas − reembolsos.
+- **Valores negativos** (`lancamentos.valor`, sem CHECK no banco): qualquer categoria, nunca zero. O negativo abate o total do grupo, sempre somado com sinal (`sumMoney`, sem `Math.abs`): cartão → total da fatura e limite usado (estorno, crédito, pagamento antecipado); saídas → total de Saídas e, com subcategoria, o gasto dela nos Limites do Mês; entradas → total de Entradas. Negativo dispensa subcategoria (pagamento antecipado não é gasto de nenhuma); positivo nas saídas continua exigindo. Sempre avulso: parcelamentos, recorrências, Prioridades ("Comprei") e Metas/aportes só aceitam positivo. Exibição `− R$ 50,00` (`formatCurrency`), verde nas saídas + selo "Crédito", vermelho nas entradas (`ValorLancamento`/`SeloCredito`). Regras puras em `lib/lancamento.ts` (`validarLancamento`, `ehCredito`). Importação: fatura de cartão mantém o sinal (crédito entra negativo; linha "pagamento" que não é antecipado vem desmarcada); extrato de conta segue com débito → saída positiva, crédito → entrada.
 
 ## Identified Patterns
 
@@ -47,7 +48,7 @@ flowchart LR
 ### Store ("finance-store")
 
 **Location:** `src/lib/finance-store.ts` (hook), `src/lib/store/{types,mappers,derivados}.ts`
-**Implementation:** `useEntidade()` genérico (load/add/update/remove + toasts) por tabela; um mapper por entidade (`mappers.ts`) usado no load e na escrita. Lotes via RPC (`inserir_lancamentos`, `salvar_parcelamento`, `excluir_parcelamento`, `atualizar_recorrencia_futuros`) e depois recarrega do banco. Realtime: um canal por household assina as tabelas e recarrega a entidade alterada (debounce 400 ms). Totais com `sumMoney` (centavos). Derivados: `limiteEfetivo`, `resumoFatura`, `faturasDoCartao`, `progressoParcelamento`, `statusLancamentoCartao`. Mês/ano selecionado global (`SeletorMes` no topo).
+**Implementation:** `useEntidade()` genérico (load/add/update/remove + toasts) por tabela; um mapper por entidade (`mappers.ts`) usado no load e na escrita. Lotes via RPC (`inserir_lancamentos`, `salvar_parcelamento`, `excluir_parcelamento`, `atualizar_recorrencia_futuros`) e depois recarrega do banco. Realtime: um canal por household assina as tabelas e recarrega a entidade alterada (debounce 400 ms). Totais com `sumMoney` (centavos). Derivados: `totaisDoMes`, `gastoPorSubcategoria`, `limiteEfetivo`, `resumoFatura`, `faturasDoCartao`, `progressoParcelamento`, `statusLancamentoCartao`. Mês/ano selecionado global (`SeletorMes` no topo).
 
 ### Domínio puro (testado)
 
@@ -57,7 +58,7 @@ flowchart LR
 
 ### Formulários reutilizáveis
 
-`LancamentoForm` (sugestão de subcategoria/cartão por histórico, fatura calculada, vira parcelamento se N>1, "só esta / esta e as próximas" em parcelas, vincular aporte em reserva), `ParcelamentoForm` (novo / editar com "aplicar às futuras" / vincular legado com detecção de duplicados), `CartaoFormDialog`, `MoneyInput` (máscara BRL).
+`LancamentoForm` (sugestão de subcategoria/cartão por histórico, fatura calculada, vira parcelamento se N>1, "só esta / esta e as próximas" em parcelas, vincular aporte em reserva), `ParcelamentoForm` (novo / editar com "aplicar às futuras" / vincular legado com detecção de duplicados), `CartaoFormDialog`, `MoneyInput` (máscara BRL; `permitirNegativo` = botão +/− e "-" digitado, só no `LancamentoForm` e no filtro de valor).
 
 ### UX transversal
 

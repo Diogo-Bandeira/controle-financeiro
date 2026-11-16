@@ -76,6 +76,13 @@ curl -sS "https://api.telegram.org/bot$TOKEN/setMyCommands" \
 ## 7. Uso
 
 - `mercado 130`, `uber 23,90 pix ontem`, `mercado 130 nubank`, `tênis 600 3x bradesco`, `tênis 3x200 bradesco`, `+5000 salário`, `conta de luz 180 10/11`.
+- Valor negativo (abate o total; nunca parcelado, sem pergunta de subcategoria):
+  - `-50 nubank`, `estorno 50 nubank`, `crédito 50 nubank` → crédito de R$ 50 na fatura do Nubank (`estorno cinema 40 nubank lazer` também abate o gasto de Lazer).
+  - `pagamento antecipado 300 nubank` ou `antecipei 300 nubank` → −R$ 300 na fatura, sem subcategoria.
+  - Sem cartão (`estorno 50`) → variável negativo.
+  - `crédito` só vira crédito no começo da mensagem; `mercado 50 crédito` continua sendo compra no cartão (o bot pergunta qual).
+  - `-50 3x nubank` é recusado: o bot pede o valor sem parcelas.
+  - Confirmação: `− R$ 300,00 · Nubank · Crédito na fatura de dez/2026 (vence 10/12)`.
 - Áudio (até 2 min) e foto/PDF de comprovante (até 5 MB) sempre usam a IA.
 - Faltou cartão, subcategoria ou forma de pagamento → o bot pergunta com botões (a pergunta expira em 30 min).
 - Confirmação com **Desfazer** (24 h), **Trocar subcategoria** e **Trocar cartão** (recalcula a fatura/parcelas).

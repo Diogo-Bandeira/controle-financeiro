@@ -21,7 +21,7 @@
 │   │   ├── LancamentoForm.tsx / ParcelamentoForm.tsx / CartaoFormDialog.tsx
 │   │   ├── RecorrenciasDialog.tsx / ImportarExtratoDialog.tsx
 │   │   ├── OrcamentoCategorias.tsx  # painel "Limites do Mês"
-│   │   ├── SeletorMes.tsx / AlertasPopover.tsx / MoneyInput.tsx / CamposData.tsx
+│   │   ├── SeletorMes.tsx / AlertasPopover.tsx / MoneyInput.tsx / CamposData.tsx / ValorLancamento.tsx (+ SeloCredito)
 │   │   ├── SubcategoriaChip.tsx (ChipCor, CartaoChip, OpcaoCor) / EstadoVazio.tsx (+ PaginaCarregando)
 │   │   ├── ChatFinanceiro.tsx / ConsultorIA.tsx
 │   │   └── ui/                # shadcn generated
@@ -29,7 +29,7 @@
 │   ├── lib/
 │   │   ├── finance-store.ts   # FinanceProvider / useFinanceData + SUBCATEGORIAS_PADRAO
 │   │   ├── store/             # types.ts, mappers.ts, derivados.ts
-│   │   ├── fatura.ts money.ts recorrencias.ts parcelamento-ops.ts importacao.ts texto.ts metas.ts format.ts
+│   │   ├── fatura.ts money.ts recorrencias.ts parcelamento-ops.ts importacao.ts texto.ts metas.ts format.ts lancamento.ts
 │   │   └── *.test.ts          # testes unitários do domínio
 │   ├── integrations/supabase/ # client.ts, types.ts (atualizado à mão — regenerar após aplicar migrations)
 │   └── test/                  # setup.ts, example.test.ts, paginas.smoke.test.tsx
