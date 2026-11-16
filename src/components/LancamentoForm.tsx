@@ -21,6 +21,8 @@ import { cartaoConfigurado, faturaDoCartao, parseISODate, toISODate, type MesAno
 import { competenciaDoLancamento } from "@/lib/recorrencias";
 import { aplicarAPartirDe } from "@/lib/parcelamento-ops";
 import { sugerir } from "@/lib/sugestao";
+import { validarLancamento } from "@/lib/lancamento";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 export interface LancamentoSalvo {
@@ -110,7 +112,9 @@ export function LancamentoForm({ open, onOpenChange, lancamento, inicial, onSalv
   const competencia = ehCartao && alterarFatura ? faturaManual : competenciaCalculada;
   const fatura = ehCartao && cartao ? faturaDoCartao(competencia, cartao) : null;
   const parcelaDe = lancamento?.parcelamentoId ? parcelamentos.find((p) => p.id === lancamento.parcelamentoId) : null;
+  const negativo = valor < 0;
   const ehReserva = subcategoria === "reserva";
+  const vincularMeta = ehReserva && !negativo;
 
   const montar = (): NovoLancamento => ({
     descricao: descricao.trim(),
@@ -130,13 +134,10 @@ export function LancamentoForm({ open, onOpenChange, lancamento, inicial, onSalv
     origem: lancamento?.origem ?? inicial?.origem ?? "manual",
   });
 
-  const validar = () => {
-    if (!descricao.trim()) return "Informe a descrição";
-    if (valor <= 0) return "Informe o valor";
-    if (ehSaida && !subcategoria) return "Selecione a subcategoria";
-    if (ehCartao && !cartaoId) return "Selecione o cartão";
-    return null;
-  };
+  const validar = () =>
+    validarLancamento({
+      descricao, valor, categoria, subcategoria, cartaoId, parcelaOuRecorrente: !!lancamento?.parcelamentoId || !!lancamento?.recorrenciaId,
+    });
 
   const concluir = (r: LancamentoSalvo) => {
     onSalvo?.(r);
@@ -154,7 +155,7 @@ export function LancamentoForm({ open, onOpenChange, lancamento, inicial, onSalv
       return;
     }
     const novo = await addLancamento(dados);
-    if (novo && ehReserva && metaId !== SEM) {
+    if (novo && vincularMeta && metaId !== SEM) {
       await addAporte({ metaId, data: novo.data, valor: novo.valor, lancamentoId: novo.id });
       toast.success("Aporte vinculado à meta");
     }
@@ -174,7 +175,7 @@ export function LancamentoForm({ open, onOpenChange, lancamento, inicial, onSalv
     if (salvo) concluir({ parcelamento: salvo });
   };
 
-  const vaiParcelar = !lancamento && ehCartao && nParcelas > 1;
+  const vaiParcelar = !lancamento && ehCartao && !negativo && nParcelas > 1;
   const rotuloBotao = (() => {
     if (lancamento) return "Salvar alterações";
     return vaiParcelar ? "Continuar para parcelamento" : "Adicionar";
@@ -208,7 +209,7 @@ export function LancamentoForm({ open, onOpenChange, lancamento, inicial, onSalv
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>Valor</Label>
-                <MoneyInput value={valor} onChange={setValor} />
+                <MoneyInput value={valor} onChange={setValor} permitirNegativo />
               </div>
               <div>
                 <Label>Categoria</Label>
@@ -224,6 +225,10 @@ export function LancamentoForm({ open, onOpenChange, lancamento, inicial, onSalv
                 </Select>
               </div>
             </div>
+
+            {negativo && (
+              <p className="text-xs text-success -mt-2">Valor negativo abate o total (estorno, crédito ou pagamento antecipado de fatura)</p>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -244,10 +249,14 @@ export function LancamentoForm({ open, onOpenChange, lancamento, inicial, onSalv
 
             {ehSaida && (
               <div>
-                <Label>Subcategoria</Label>
-                <Select value={subcategoria} onValueChange={(v) => { setSubcategoria(v); setTocados((t) => ({ ...t, subcategoria: true })); }}>
+                <Label>{negativo ? "Subcategoria (opcional)" : "Subcategoria"}</Label>
+                <Select
+                  value={subcategoria || (negativo ? SEM : "")}
+                  onValueChange={(v) => { setSubcategoria(v === SEM ? "" : v); setTocados((t) => ({ ...t, subcategoria: true })); }}
+                >
                   <SelectTrigger><SelectValue placeholder="Selecione..." /></SelectTrigger>
                   <SelectContent>
+                    {negativo && <SelectItem value={SEM}>Sem subcategoria</SelectItem>}
                     {subcategoriasAtivas.map((s) => (
                       <SelectItem key={s.slug} value={s.slug}><OpcaoCor cor={s.cor} label={s.label} /></SelectItem>
                     ))}
@@ -258,7 +267,7 @@ export function LancamentoForm({ open, onOpenChange, lancamento, inicial, onSalv
 
             {ehCartao && (
               <div className="space-y-2">
-                <div className="grid grid-cols-[1fr_96px] gap-3">
+                <div className={cn("grid gap-3", !lancamento && !negativo && "grid-cols-[1fr_96px]")}>
                   <div>
                     <div className="flex items-center justify-between">
                       <Label>Cartão</Label>
@@ -275,7 +284,7 @@ export function LancamentoForm({ open, onOpenChange, lancamento, inicial, onSalv
                       </SelectContent>
                     </Select>
                   </div>
-                  {!lancamento && (
+                  {!lancamento && !negativo && (
                     <div>
                       <Label>Parcelas</Label>
                       <Input type="number" inputMode="numeric" min={1} max={72} value={nParcelas} onChange={(e) => setNParcelas(Math.max(1, Number(e.target.value) || 1))} />
@@ -297,7 +306,7 @@ export function LancamentoForm({ open, onOpenChange, lancamento, inicial, onSalv
                   </div>
                 )}
                 {alterarFatura && <MesAnoField value={faturaManual} onChange={setFaturaManual} />}
-                {nParcelas > 1 && <p className="text-xs text-primary">Com {nParcelas} parcelas, o lançamento vira um parcelamento.</p>}
+                {vaiParcelar && <p className="text-xs text-primary">Com {nParcelas} parcelas, o lançamento vira um parcelamento.</p>}
               </div>
             )}
 
@@ -323,7 +332,7 @@ export function LancamentoForm({ open, onOpenChange, lancamento, inicial, onSalv
                   </SelectContent>
                 </Select>
               </div>
-              {ehReserva && !lancamento && metas.length > 0 && (
+              {vincularMeta && !lancamento && metas.length > 0 && (
                 <div>
                   <Label>Vincular a uma meta</Label>
                   <Select value={metaId} onValueChange={setMetaId}>

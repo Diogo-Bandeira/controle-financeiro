@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { useFinanceData, formatCurrency } from "@/lib/finance-store";
 import { Progress } from "@/components/ui/progress";
 import { sumMoney } from "@/lib/money";
+import { gastoPorSubcategoria } from "@/lib/store/derivados";
 import { cn } from "@/lib/utils";
 
 const nivel = (pct: number) => {
@@ -20,13 +21,10 @@ export function OrcamentoCategorias({ className }: { className?: string }) {
   const { lancamentosMes, subcategorias, subcategoriasAtivas, limiteEfetivo, mesSelecionado, anoSelecionado, reembolsos } = useFinanceData();
 
   const saidas = lancamentosMes.filter((l) => l.categoria !== "entrada");
-  const gastoPor = saidas.reduce((mapa, l) => {
-    const chave = l.subcategoria ?? "";
-    return mapa.set(chave, [...(mapa.get(chave) ?? []), l.valor]);
-  }, new Map<string, number[]>());
+  const gastoPor = gastoPorSubcategoria(lancamentosMes);
 
   const linhas = subcategoriasAtivas.map((s) => {
-    const gasto = sumMoney(gastoPor.get(s.slug) ?? []);
+    const gasto = gastoPor.get(s.slug) ?? 0;
     const limite = limiteEfetivo(s.slug, anoSelecionado, mesSelecionado);
     const pct = percentualUsado(gasto, limite);
     return { s, gasto, limite, pct };

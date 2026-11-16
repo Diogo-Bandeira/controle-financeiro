@@ -17,6 +17,7 @@ import { EstadoVazio, PaginaCarregando } from "@/components/EstadoVazio";
 import { useFinanceData, formatCurrency, type Subcategoria, type TipoSubcategoria } from "@/lib/finance-store";
 import { MESES, PALETA_CORES, TIPOS_SUBCATEGORIA } from "@/lib/format";
 import { sumMoney } from "@/lib/money";
+import { gastoPorSubcategoria } from "@/lib/store/derivados";
 import { normalizarTexto } from "@/lib/texto";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -74,14 +75,12 @@ export default function Orcamento() {
   const mesSel = { mes: mesSelecionado, ano: anoSelecionado };
   const arquivadas = subcategorias.filter((s) => !s.ativa);
 
-  const gastoPor = lancamentosMes
-    .filter((l) => l.categoria !== "entrada" && l.subcategoria)
-    .reduce((m, l) => m.set(l.subcategoria, [...(m.get(l.subcategoria) ?? []), l.valor]), new Map<string, number[]>());
+  const gastoPor = gastoPorSubcategoria(lancamentosMes);
 
   const linhas = subcategoriasAtivas.map((s) => {
     const override = orcamentos.find((o) => o.subcategoriaSlug === s.slug && o.mes === mesSelecionado && o.ano === anoSelecionado);
     const limite = limiteEfetivo(s.slug, anoSelecionado, mesSelecionado);
-    const gasto = sumMoney(gastoPor.get(s.slug) ?? []);
+    const gasto = gastoPor.get(s.slug) ?? 0;
     const pct = limite > 0 ? (gasto / limite) * 100 : 0;
     return { s, override, limite, gasto, pct };
   });

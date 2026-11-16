@@ -7,6 +7,32 @@ import {
 import { sumMoney } from "../money";
 import type { Cartao, FaturaPaga, Lancamento, Parcelamento } from "./types";
 
+// Valores com sinal: negativo (estorno, crédito, pagamento antecipado) abate o total do grupo.
+const somaValores = (lancs: Lancamento[]): number => sumMoney(lancs.map((l) => l.valor));
+
+/** Totais do mês por categoria. Renda para planejamento = entradas − reembolsos. */
+export function totaisDoMes(lancamentosMes: Lancamento[]) {
+  const somaCategoria = (c: Lancamento["categoria"]) => somaValores(lancamentosMes.filter((l) => l.categoria === c));
+  const entradas = somaCategoria("entrada");
+  const reembolsos = somaValores(lancamentosMes.filter((l) => l.categoria === "entrada" && l.reembolso));
+  const contasFixas = somaCategoria("conta_fixa");
+  const totalCartao = somaCategoria("cartao");
+  const variaveis = somaCategoria("variavel");
+  const totalSaidas = sumMoney([contasFixas, totalCartao, variaveis]);
+  return {
+    entradas, reembolsos, rendaPlanejamento: sumMoney([entradas, -reembolsos]),
+    contasFixas, totalCartao, variaveis, totalSaidas, saldo: sumMoney([entradas, -totalSaidas]),
+  };
+}
+
+/** Gasto do mês por subcategoria (saídas; chave "" = sem subcategoria). */
+export function gastoPorSubcategoria(lancamentosMes: Lancamento[]): Map<string, number> {
+  const porSlug = lancamentosMes
+    .filter((l) => l.categoria !== "entrada")
+    .reduce((m, l) => m.set(l.subcategoria ?? "", [...(m.get(l.subcategoria ?? "") ?? []), l.valor]), new Map<string, number[]>());
+  return new Map([...porSlug].map(([slug, valores]) => [slug, sumMoney(valores)]));
+}
+
 export interface ResumoFatura extends Fatura {
   cartaoId: string;
   total: number;
@@ -23,7 +49,7 @@ export function resumoFatura(cartao: Cartao, competencia: MesAno, lancamentos: L
   return {
     ...faturaDoCartao(competencia, cartao),
     cartaoId: cartao.id,
-    total: sumMoney(lancs.map((l) => l.valor)),
+    total: somaValores(lancs),
     status: statusParcela(competencia, cartao, faturasPagas, hoje),
     marcadaPaga: faturaMarcadaPaga(competencia, cartao.id, faturasPagas),
     lancamentos: lancs,

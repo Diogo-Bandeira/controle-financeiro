@@ -6,7 +6,6 @@ import type { Database } from "@/integrations/supabase/types";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { limiteEfetivo as calcLimiteEfetivo, somarMeses, toISODate, type MesAno } from "./fatura";
-import { sumMoney } from "./money";
 import { MESES_RECORRENCIA, lancamentosRecorrentesDaJanela, mesDaData } from "./recorrencias";
 import { definirValoresOcultos, gravarLocalStorage, lerLocalStorage } from "./format";
 import {
@@ -16,7 +15,7 @@ import {
 } from "./store/mappers";
 import {
   faturasDoCartao as calcFaturasDoCartao, progressoParcelamento as calcProgresso, resumoFatura as calcResumoFatura,
-  statusLancamentoCartao as calcStatusLancamento,
+  statusLancamentoCartao as calcStatusLancamento, totaisDoMes,
 } from "./store/derivados";
 import type { Household, Lancamento, Membro, NovoLancamento, Parcelamento, Recorrencia, Subcategoria } from "./store/types";
 
@@ -452,15 +451,10 @@ function useFinanceDataInternal() {
   );
 
   const lancamentosMes = useMemo(() => lancamentosDoMes(anoSelecionado, mesSelecionado), [lancamentosDoMes, anoSelecionado, mesSelecionado]);
-  const somaCategoria = (c: Lancamento["categoria"]) => sumMoney(lancamentosMes.filter((l) => l.categoria === c).map((l) => l.valor));
-  const entradas = somaCategoria("entrada");
-  const reembolsos = sumMoney(lancamentosMes.filter((l) => l.categoria === "entrada" && l.reembolso).map((l) => l.valor));
-  const rendaPlanejamento = sumMoney([entradas, -reembolsos]);
-  const contasFixas = somaCategoria("conta_fixa");
-  const totalCartao = somaCategoria("cartao");
-  const variaveis = somaCategoria("variavel");
-  const totalSaidas = sumMoney([contasFixas, totalCartao, variaveis]);
-  const saldo = sumMoney([entradas, -totalSaidas]);
+  const { entradas, reembolsos, rendaPlanejamento, contasFixas, totalCartao, variaveis, totalSaidas, saldo } = useMemo(
+    () => totaisDoMes(lancamentosMes),
+    [lancamentosMes],
+  );
 
   const irParaMes = useCallback((delta: number) => {
     const alvo = somarMeses(mesSelecionado, anoSelecionado, delta);

@@ -27,8 +27,10 @@ export function definirValoresOcultos(v: boolean) {
   valoresOcultos = v;
 }
 
+/** Negativo com sinal de menos separado: "− R$ 50,00". */
 export function formatCurrency(value: number): string {
-  return valoresOcultos ? "R$ •••••" : brl.format(value);
+  if (valoresOcultos) return "R$ •••••";
+  return value < 0 ? `− ${brl.format(-value)}` : brl.format(value);
 }
 
 /** "fev/2026" */

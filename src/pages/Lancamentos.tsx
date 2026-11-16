@@ -13,6 +13,7 @@ import { ImportarExtratoDialog } from "@/components/ImportarExtratoDialog";
 import { CartaoChip, ChipCor, OpcaoCor, SubcategoriaChip } from "@/components/SubcategoriaChip";
 import { EstadoVazio, PaginaCarregando } from "@/components/EstadoVazio";
 import { MoneyInput } from "@/components/MoneyInput";
+import { SeloCredito, ValorLancamento } from "@/components/ValorLancamento";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -242,7 +243,7 @@ export default function Lancamentos() {
   }, [itensCartao, resumoFatura, mesSelecionado, anoSelecionado]);
   const totaisPorSubcategoria = subcategoriasAtivas
     .map((s) => ({ ...s, total: sumMoney(itensCartao.filter((l) => l.subcategoria === s.slug).map((l) => l.valor)) }))
-    .filter((s) => s.total > 0);
+    .filter((s) => s.total !== 0);
 
   // ─── Seleção e ações em massa ──────────────────────────────────────────
 
@@ -536,11 +537,11 @@ export default function Lancamentos() {
                 <div className="flex items-end gap-1">
                   <div>
                     <Label className="text-[11px] text-muted-foreground">Mín.</Label>
-                    <MoneyInput className="h-8 w-[110px] text-xs" value={filtros.valorMin} onChange={(v) => setFiltro("valorMin", v || null)} />
+                    <MoneyInput className="h-8 w-[110px] text-xs" value={filtros.valorMin} onChange={(v) => setFiltro("valorMin", v || null)} permitirNegativo />
                   </div>
                   <div>
                     <Label className="text-[11px] text-muted-foreground">Máx.</Label>
-                    <MoneyInput className="h-8 w-[110px] text-xs" value={filtros.valorMax} onChange={(v) => setFiltro("valorMax", v || null)} />
+                    <MoneyInput className="h-8 w-[110px] text-xs" value={filtros.valorMax} onChange={(v) => setFiltro("valorMax", v || null)} permitirNegativo />
                   </div>
                 </div>
               </div>
@@ -825,6 +826,7 @@ function LinhaLancamento({ l, totalParcelas, selecionado, onSelecionar, onEditar
               <Send className="h-2.5 w-2.5" /> Telegram
             </span>
           )}
+          <SeloCredito l={l} />
           {entrada && l.reembolso && (
             <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-success/10 text-success">Reembolso</span>
           )}
@@ -834,13 +836,11 @@ function LinhaLancamento({ l, totalParcelas, selecionado, onSelecionar, onEditar
         </div>
       </div>
       <div className="flex items-center gap-0.5 shrink-0">
-        <span className={cn("font-medium text-sm whitespace-nowrap mr-1", entrada ? "text-success" : "")}>
-          {entrada ? "+" : ""}{formatCurrency(l.valor)}
-        </span>
+        <ValorLancamento l={l} className="font-medium text-sm whitespace-nowrap mr-1" />
         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onEditar} title="Editar">
           <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
         </Button>
-        {!l.parcelamentoId && !l.recorrenciaId && (
+        {!l.parcelamentoId && !l.recorrenciaId && l.valor > 0 && (
           <Button variant="ghost" size="icon" className="h-7 w-7 hidden sm:inline-flex" onClick={onRecorrente} title="Tornar recorrente">
             <Repeat className="h-3.5 w-3.5 text-muted-foreground" />
           </Button>

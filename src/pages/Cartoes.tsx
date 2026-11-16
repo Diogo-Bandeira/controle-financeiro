@@ -10,6 +10,7 @@ import {
 import { CartaoFormDialog } from "@/components/CartaoFormDialog";
 import { MesAnoField } from "@/components/CamposData";
 import { SubcategoriaChip } from "@/components/SubcategoriaChip";
+import { SeloCredito, ValorLancamento } from "@/components/ValorLancamento";
 import { EstadoVazio, PaginaCarregando } from "@/components/EstadoVazio";
 import { formatCurrency, useFinanceData, type Cartao } from "@/lib/finance-store";
 import { formatDiaMes, formatDiaMesData, formatMesAno } from "@/lib/format";
@@ -197,6 +198,7 @@ function FaturaDetalhe({ cartao, competencia, onCompetencia, onClose }: {
                         <p className="text-sm truncate">{l.descricao}</p>
                         <div className="flex flex-wrap gap-1">
                           <SubcategoriaChip slug={l.subcategoria} />
+                          <SeloCredito l={l} />
                           {l.parcelaNum != null && (
                             <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-primary/10 text-primary">
                               Parcela {l.parcelaNum}/{parc?.parcelas ?? "?"}
@@ -204,7 +206,7 @@ function FaturaDetalhe({ cartao, competencia, onCompetencia, onClose }: {
                           )}
                         </div>
                       </div>
-                      <span className="text-sm font-medium shrink-0">{formatCurrency(l.valor)}</span>
+                      <ValorLancamento l={l} className="text-sm font-medium shrink-0" />
                     </div>
                   );
                 })}

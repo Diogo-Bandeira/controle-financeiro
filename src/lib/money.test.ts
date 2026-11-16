@@ -19,4 +19,11 @@ describe("money", () => {
     expect(sumMoney([])).toBe(0);
     expect(sumMoney([100, -33.33])).toBe(66.67);
   });
+  it("sumMoney com negativos abate sem perder centavos", () => {
+    expect(sumMoney([-50])).toBe(-50);
+    expect(sumMoney([0.1, 0.2, -0.3])).toBe(0);
+    expect(sumMoney([130.45, 89.9, -50.35])).toBe(170);
+    expect(sumMoney([-0.1, -0.2])).toBe(-0.3);
+    expect(sumMoney([300, -300.01])).toBe(-0.01);
+  });
 });

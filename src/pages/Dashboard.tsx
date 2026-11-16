@@ -5,6 +5,7 @@ import { Progress } from "@/components/ui/progress";
 import { ConsultorIA } from "@/components/ConsultorIA";
 import { OrcamentoCategorias } from "@/components/OrcamentoCategorias";
 import { EstadoVazio, PaginaCarregando } from "@/components/EstadoVazio";
+import { ValorLancamento } from "@/components/ValorLancamento";
 import { useFinanceData, formatCurrency, MESES, type Lancamento } from "@/lib/finance-store";
 import { formatDiaMes, formatDiaMesData, formatMesAno, MESES_CURTOS } from "@/lib/format";
 import { compararMesAno, diasEntre, indiceMes, parseISODate, somarMeses, type MesAno } from "@/lib/fatura";
@@ -235,7 +236,7 @@ export default function Dashboard() {
                         <span className={cn("text-xs whitespace-nowrap", dias <= 2 ? "text-warning font-semibold" : "text-muted-foreground")}>
                           {dias === 0 ? "vence hoje" : `vence ${formatDiaMes(l.data)}`}
                         </span>
-                        <span className="font-medium whitespace-nowrap">{formatCurrency(l.valor)}</span>
+                        <ValorLancamento l={l} className="font-medium whitespace-nowrap" />
                       </div>
                     ))}
                   </div>

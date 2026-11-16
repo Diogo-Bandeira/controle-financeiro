@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { MesAnoField } from "@/components/CamposData";
 import { OpcaoCor } from "@/components/SubcategoriaChip";
+import { ValorLancamento } from "@/components/ValorLancamento";
 import { formatCurrency, useFinanceData, type Lancamento, type NovoLancamento } from "@/lib/finance-store";
 import { formatDiaMes } from "@/lib/format";
 import { faturaAberta, parseISODate, type MesAno } from "@/lib/fatura";
@@ -37,7 +38,10 @@ interface LinhaPrevia {
   subcategoria: string;
   incluir: boolean;
   duplicado: boolean;
-  estorno: boolean;
+  /** Linha negativa da fatura do cartão (estorno/crédito): entra negativa e abate o total. */
+  credito: boolean;
+  /** Crédito que parece o pagamento da fatura anterior: desmarcado por padrão. */
+  pagamentoFatura: boolean;
   parcela: { atual: number; total: number } | null;
 }
 
@@ -56,7 +60,7 @@ function sugerirSubcategoria(descricao: string, historico: Lancamento[]): string
   return [...contagem.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
 }
 
-/** Cartão: tudo é compra; conta: negativo = saída variável, positivo = entrada. */
+/** Cartão: tudo é do cartão (negativo = crédito); conta: negativo = saída variável, positivo = entrada. */
 function categoriaImportada(tipo: string, valor: number): Lancamento["categoria"] {
   if (tipo === "cartao") return "cartao";
   return valor < 0 ? "variavel" : "entrada";
@@ -98,8 +102,11 @@ export function ImportarExtratoDialog({ open, onOpenChange }: ImportarExtratoDia
     if (!brutas) return;
     setPrevia(
       brutas.map((b, idx) => {
-        const valor = Math.abs(b.valor);
-        const estorno = tipo === "cartao" && b.valor < 0;
+        // Fatura do cartão mantém o sinal (estorno/crédito negativo); extrato de conta vira entrada/saída positiva.
+        const valor = tipo === "cartao" ? b.valor : Math.abs(b.valor);
+        const credito = valor < 0;
+        const desc = normalizarTexto(b.descricao);
+        const pagamentoFatura = credito && /\bpagamento\b/.test(desc) && !/\bantecipad/.test(desc);
         const categoria = categoriaImportada(tipo, b.valor);
         const duplicado = lancamentos.some(
           (l) => l.data === b.data && Math.abs(l.valor - valor) <= 0.01 && descricoesParecidas(l.descricao, b.descricao),
@@ -110,10 +117,11 @@ export function ImportarExtratoDialog({ open, onOpenChange }: ImportarExtratoDia
           descricao: b.descricao,
           valor,
           categoria,
-          subcategoria: categoria === "entrada" ? "" : sugerirSubcategoria(b.descricao, historico),
-          incluir: !duplicado && !estorno,
+          subcategoria: categoria === "entrada" || pagamentoFatura ? "" : sugerirSubcategoria(b.descricao, historico),
+          incluir: !duplicado && !pagamentoFatura,
           duplicado,
-          estorno,
+          credito,
+          pagamentoFatura,
           parcela: detectarParcela(b.descricao),
         };
       }),
@@ -304,7 +312,8 @@ export function ImportarExtratoDialog({ open, onOpenChange }: ImportarExtratoDia
                               <AlertTriangle className="h-3 w-3 mr-0.5" /> Duplicado?
                             </Badge>
                           )}
-                          {l.estorno && <Badge variant="outline" className="text-[10px]">Pagamento/estorno</Badge>}
+                          {l.credito && !l.pagamentoFatura && <Badge variant="outline" className="text-[10px] text-success">Crédito</Badge>}
+                          {l.pagamentoFatura && <Badge variant="outline" className="text-[10px]">Pagamento de fatura?</Badge>}
                           {l.parcela && (
                             <Badge variant="outline" className="text-[10px] border-primary/40 text-primary">
                               Parcela {l.parcela.atual}/{l.parcela.total}
@@ -313,7 +322,7 @@ export function ImportarExtratoDialog({ open, onOpenChange }: ImportarExtratoDia
                           {l.categoria === "entrada" && <Badge variant="outline" className="text-[10px] text-success">Entrada</Badge>}
                         </div>
                       </TableCell>
-                      <TableCell className="text-right whitespace-nowrap text-sm font-medium">{formatCurrency(l.valor)}</TableCell>
+                      <TableCell className="text-right whitespace-nowrap text-sm font-medium"><ValorLancamento l={l} /></TableCell>
                       <TableCell>
                         {l.categoria !== "entrada" && (
                           <Select value={l.subcategoria || SEM} onValueChange={(v) => atualizar(l.idx, { subcategoria: v === SEM ? "" : v })}>
